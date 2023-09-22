@@ -228,7 +228,7 @@ index 0000000000..d98305ba33
 +	default 0x80200000 if RISCV_SMODE
 +
 +config SPL_TEXT_BASE
-+	default 0x70000000
++	default 0x82000000
 +
 +config SPL_OPENSBI_LOAD_ADDR
 +	default 0x80000000
@@ -394,7 +394,7 @@ index 0000000000..ed20ca4709
 +#ifdef CONFIG_SPL
 +#define CONFIG_SPL_MAX_SIZE		0x00020000
 +
-+#define CONFIG_SPL_BSS_START_ADDR	0x70018000
++#define CONFIG_SPL_BSS_START_ADDR	0x82018000
 +#define CONFIG_SPL_BSS_MAX_SIZE		0x00008000
 +
 +// We need more space than the SPM can provide, so put the heap into HBM.
@@ -402,7 +402,7 @@ index 0000000000..ed20ca4709
 +#define CONFIG_SYS_SPL_MALLOC_START	0x84000000
 +#define CONFIG_SYS_SPL_MALLOC_SIZE	0x00100000
 +
-+#define CONFIG_SPL_STACK	0x70018000
++#define CONFIG_SPL_STACK	0x82018000
 +#endif
 +
 +// OpenSBI is at 0x80000000
