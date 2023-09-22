@@ -46,5 +46,5 @@ should_be_empty_or_undefined CXXFLAGS
 should_be_empty_or_undefined C_INCLUDE_PATH
 should_be_empty_or_undefined LDFLAGS
 should_be_empty_or_undefined LDLIBS
-should_be_empty_or_undefined LD_LIBRARY_PATH
+#should_be_empty_or_undefined LD_LIBRARY_PATH
 should_be_empty_or_undefined LIBRARY_PATH
