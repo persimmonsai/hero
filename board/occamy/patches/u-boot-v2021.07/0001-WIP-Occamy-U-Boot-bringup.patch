@@ -1,4 +1,4 @@
-From d0d9aeb47d4ab106f8131e0941433317b138808b Mon Sep 17 00:00:00 2001
+From 0041d11bd6ee525f4ad59034186c7fba1d83f644 Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Tue, 10 Oct 2023 13:04:27 +0200
 Subject: [PATCH] Patch
@@ -11,15 +11,22 @@ Subject: [PATCH] Patch
  board/pulp-platform/occamy/Kconfig      |  31 +++++
  board/pulp-platform/occamy/Makefile     |   5 +
  board/pulp-platform/occamy/occamy.c     |   5 +
- board/pulp-platform/occamy/occamy_spl.c |  72 +++++++++++
- common/init/board_init.c                |   2 +
+ board/pulp-platform/occamy/occamy_spl.c |  70 ++++++++++
+ common/init/board_init.c                |   8 ++
  common/log.c                            |  19 +++
- configs/pulp-platform_occamy_defconfig  |  75 +++++++++++
- drivers/core/root.c                     |   2 +
+ common/spl/spl.c                        |   6 +-
+ common/spl/spl_fit.c                    |   4 +-
+ common/spl/spl_opensbi.c                |  10 +-
+ configs/pulp-platform_occamy_defconfig  |  77 +++++++++++
+ drivers/core/lists.c                    |  19 +--
+ drivers/core/root.c                     |   6 +-
  include/configs/pulp-platform_occamy.h  |  39 ++++++
+ include/init.h                          |   5 +
  include/log.h                           |   7 +
+ lib/display_options.c                   |  10 +-
+ lib/fdtdec.c                            |  12 +-
  lib/tiny-printf.c                       |  12 +-
- 15 files changed, 438 insertions(+), 2 deletions(-)
+ 22 files changed, 487 insertions(+), 29 deletions(-)
  create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
  create mode 100644 arch/riscv/dts/occamy.dts
  create mode 100644 board/pulp-platform/occamy/Kconfig
@@ -72,7 +79,7 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..15c5e28431
+index 0000000000..25cb6bcdfc
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
 @@ -0,0 +1,165 @@
@@ -169,17 +176,17 @@ index 0000000000..15c5e28431
 +      reg-names = "control";
 +    };
 +    ramdisk@0 {
-+      partition@6000000 {
++      partition@a0000000 {
 +        label = "u-boot";
 +        reg = <0xa0000000 0x100000>; // 1 MB
 +        read-only;
 +      };
-+      uimage@6100000 {
++      uimage@a0100000 {
 +        label = "uimage";
 +        reg = <0xa0100000 0x1000000>; // 16 MB
 +        read-only;
 +      };
-+      partition@7100000 {
++      partition@a1100000 {
 +        label = "filesystem";
 +        reg = <0xa1100000 0x8f00000>; // 143 MB
 +      };
@@ -302,17 +309,15 @@ index 0000000000..d703634b1a
 +int ft_board_setup(void *fdt, struct bd_info *bd) { return 0; }
 diff --git a/board/pulp-platform/occamy/occamy_spl.c b/board/pulp-platform/occamy/occamy_spl.c
 new file mode 100644
-index 0000000000..cf81b2acbc
+index 0000000000..8e7b36c8f8
 --- /dev/null
 +++ b/board/pulp-platform/occamy/occamy_spl.c
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,70 @@
 +#include <init.h>
 +#include <spl.h>
 +#include <misc.h>
 +#include <log.h>
 +#include <asm/spl.h>
-+
-+#define OCCAMY_LOG_BASE (0x80000000)
 +
 +int spl_board_init_f(void)
 +{
@@ -343,7 +348,7 @@ index 0000000000..cf81b2acbc
 +	return _ptr;
 +}
 +
-+unsigned long get_log_size() {
++unsigned int get_log_size(void) {
 +	unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
 +	return *_log_size;
 +}
@@ -353,7 +358,7 @@ index 0000000000..cf81b2acbc
 +	*_log_size = *_log_size + size;
 +}
 +
-+char *get_log_ptr () {
++char *get_log_ptr (void) {
 +	char *_log_ptr = (char *)(OCCAMY_LOG_BASE + 8 + get_log_size());
 +	return _log_ptr;
 +}
@@ -380,14 +385,27 @@ index 0000000000..cf81b2acbc
 +}
 \ No newline at end of file
 diff --git a/common/init/board_init.c b/common/init/board_init.c
-index 3f183ee113..ea31d7d2cb 100644
+index 3f183ee113..c5ee064e4a 100644
 --- a/common/init/board_init.c
 +++ b/common/init/board_init.c
-@@ -138,6 +138,8 @@ void board_init_f_init_reserve(ulong base)
+@@ -87,6 +87,11 @@ ulong board_init_f_alloc_reserve(ulong top)
+ 	return top;
+ }
+ 
++void clear_log_size(void) {
++	unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
++	*_log_size = 0;
++}
++
+ /*
+  * Initialize reserved space (which has been safely allocated on the C
+  * stack from the C runtime environment handling code).
+@@ -138,6 +143,9 @@ void board_init_f_init_reserve(ulong base)
  	 * Use gd_ptr, as gd may not be properly set yet.
  	 */
  
-+	//_occamy_puts("Hello Occamy!\n");
++	clear_log_size();
++	_occamy_puts("board_init_f_init_reserve\n");
 +
  	gd_ptr = (struct global_data *)base;
  	/* zero the area */
@@ -429,12 +447,98 @@ index ea407c6db9..25e73b1410 100644
  			va_end(args);
  		}
  
+diff --git a/common/spl/spl.c b/common/spl/spl.c
+index a0a608fd77..b016d3014f 100644
+--- a/common/spl/spl.c
++++ b/common/spl/spl.c
+@@ -436,6 +436,7 @@ static int spl_common_init(bool setup_malloc)
+ {
+ 	int ret;
+ 
++	debug("%s\n", __func__);
+ #if CONFIG_VAL(SYS_MALLOC_F_LEN)
+ 	if (setup_malloc) {
+ #ifdef CONFIG_MALLOC_F_ADDR
+@@ -510,8 +511,10 @@ int spl_early_init(void)
+ 	debug("%s\n", __func__);
+ 
+ 	ret = spl_common_init(true);
+-	if (ret)
++	if (ret) {
++		while (1) {}
+ 		return ret;
++	}
+ 	gd->flags |= GD_FLG_SPL_EARLY_INIT;
+ 
+ 	return 0;
+@@ -731,6 +734,7 @@ void board_init_r(gd_t *dummy1, ulong dummy2)
+ #ifdef CONFIG_CPU_V7M
+ 	spl_image.entry_point |= 0x1;
+ #endif
++	debug("*** Preparing to jump : %d\n", spl_image.os);
+ 	switch (spl_image.os) {
+ 	case IH_OS_U_BOOT:
+ 		debug("Jumping to %s...\n", spl_phase_name(spl_next_phase()));
+diff --git a/common/spl/spl_fit.c b/common/spl/spl_fit.c
+index caddf51196..0acd204f98 100644
+--- a/common/spl/spl_fit.c
++++ b/common/spl/spl_fit.c
+@@ -312,11 +312,11 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
+ 	}
+ 
+ 	if (CONFIG_IS_ENABLED(FIT_SIGNATURE)) {
+-		printf("## Checking hash(es) for Image %s ... ",
++		debug("## Checking hash(es) for Image %s ... ",
+ 		       fit_get_name(fit, node, NULL));
+ 		if (!fit_image_verify_with_data(fit, node, src, length))
+ 			return -EPERM;
+-		puts("OK\n");
++		debug("OK\n");
+ 	}
+ 
+ 	if (CONFIG_IS_ENABLED(FIT_IMAGE_POST_PROCESS))
+diff --git a/common/spl/spl_opensbi.c b/common/spl/spl_opensbi.c
+index 1c0abf8553..b39199527e 100644
+--- a/common/spl/spl_opensbi.c
++++ b/common/spl/spl_opensbi.c
+@@ -46,18 +46,19 @@ static int spl_opensbi_find_uboot_node(void *blob, int *uboot_node)
+ void spl_invoke_opensbi(struct spl_image_info *spl_image)
+ {
+ 	int ret, uboot_node;
+-	ulong uboot_entry;
++	ulong uboot_entry = 0;
+ 	void (*opensbi_entry)(ulong hartid, ulong dtb, ulong info);
+ 
++	debug("spl_invoke_opensbi: opensbi_entry=%p\n", spl_image->entry_point);
++
+ 	if (!spl_image->fdt_addr) {
+-		pr_err("No device tree specified in SPL image\n");
++		debug("No device tree specified in SPL image\n");
+ 		hang();
+ 	}
+-
+ 	/* Find U-Boot image in /fit-images */
+ 	ret = spl_opensbi_find_uboot_node(spl_image->fdt_addr, &uboot_node);
+ 	if (ret) {
+-		pr_err("Can't find U-Boot node, %d\n", ret);
++		debug("Can't find U-Boot node, %d\n", ret);
+ 		hang();
+ 	}
+ 
+@@ -94,6 +95,7 @@ void spl_invoke_opensbi(struct spl_image_info *spl_image)
+ 	if (ret)
+ 		hang();
+ #endif
++	debug("Invoking OPENSBI\n");
+ 	opensbi_entry(gd->arch.boot_hart, (ulong)spl_image->fdt_addr,
+ 		      (ulong)&opensbi_info);
+ }
 diff --git a/configs/pulp-platform_occamy_defconfig b/configs/pulp-platform_occamy_defconfig
 new file mode 100644
-index 0000000000..65b0798969
+index 0000000000..6cd883e169
 --- /dev/null
 +++ b/configs/pulp-platform_occamy_defconfig
-@@ -0,0 +1,75 @@
+@@ -0,0 +1,77 @@
 +CONFIG_RISCV=y
 +CONFIG_SYS_MALLOC_F_LEN=0x3000
 +#CONFIG_DM_GPIO is not set
@@ -510,20 +614,105 @@ index 0000000000..65b0798969
 +#CONFIG_SPI is not set
 +#CONFIG_XILINX_SPI is not set
 +CONFIG_CLINT_TIMER=y
++#CONFIG_SPL_OS_BOOT is not set
++CONFIG_FIT_SIGNATURE=y
 \ No newline at end of file
+diff --git a/drivers/core/lists.c b/drivers/core/lists.c
+index e214306b90..b52377eace 100644
+--- a/drivers/core/lists.c
++++ b/drivers/core/lists.c
+@@ -198,17 +198,18 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
+ 	if (devp)
+ 		*devp = NULL;
+ 	name = ofnode_get_name(node);
+-	log_debug("bind node %s\n", name);
++
++	debug("bind node, name = \"%s\"\n", name);
+ 
+ 	compat_list = ofnode_get_property(node, "compatible", &compat_length);
+ 	if (!compat_list) {
+ 		if (compat_length == -FDT_ERR_NOTFOUND) {
+-			log_debug("Device '%s' has no compatible string\n",
++			debug("Device '%s' has no compatible string\n",
+ 				  name);
+ 			return 0;
+ 		}
+ 
+-		dm_warn("Device tree error at node '%s'\n", name);
++		debug("Device tree error at node '%s'\n", name);
+ 		return compat_length;
+ 	}
+ 
+@@ -219,7 +220,7 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
+ 	 */
+ 	for (i = 0; i < compat_length; i += strlen(compat) + 1) {
+ 		compat = compat_list + i;
+-		log_debug("   - attempt to match compatible string '%s'\n",
++		debug("   - attempt to match compatible string '%s'\n",
+ 			  compat);
+ 
+ 		for (entry = driver; entry != driver + n_ents; entry++) {
+@@ -234,22 +235,22 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
+ 		if (pre_reloc_only) {
+ 			if (!ofnode_pre_reloc(node) &&
+ 			    !(entry->flags & DM_FLAG_PRE_RELOC)) {
+-				log_debug("Skipping device pre-relocation\n");
++				debug("Skipping device pre-relocation\n");
+ 				return 0;
+ 			}
+ 		}
+ 
+-		log_debug("   - found match at '%s': '%s' matches '%s'\n",
++		debug("   - found match at '%s': '%s' matches '%s'\n",
+ 			  entry->name, entry->of_match->compatible,
+ 			  id->compatible);
+ 		ret = device_bind_with_driver_data(parent, entry, name,
+ 						   id->data, node, &dev);
+ 		if (ret == -ENODEV) {
+-			log_debug("Driver '%s' refuses to bind\n", entry->name);
++			debug("Driver '%s' refuses to bind\n", entry->name);
+ 			continue;
+ 		}
+ 		if (ret) {
+-			dm_warn("Error binding driver '%s': %d\n", entry->name,
++			debug("Error binding driver '%s': %d\n", entry->name,
+ 				ret);
+ 			return log_msg_ret("bind", ret);
+ 		} else {
+@@ -261,7 +262,7 @@ int lists_bind_fdt(struct udevice *parent, ofnode node, struct udevice **devp,
+ 	}
+ 
+ 	if (!found && !result && ret != -ENODEV)
+-		log_debug("No match for node '%s'\n", name);
++		debug("No match for node '%s'\n", name);
+ 
+ 	return result;
+ }
 diff --git a/drivers/core/root.c b/drivers/core/root.c
-index fe0562cd6f..27146ee05f 100644
+index fe0562cd6f..f74f045e87 100644
 --- a/drivers/core/root.c
 +++ b/drivers/core/root.c
-@@ -265,6 +265,8 @@ static int dm_scan_fdt_node(struct udevice *parent, ofnode parent_node,
- 	int ret = 0, err = 0;
- 	ofnode node;
+@@ -273,8 +273,10 @@ static int dm_scan_fdt_node(struct udevice *parent, ofnode parent_node,
+ 	     node = ofnode_next_subnode(node)) {
+ 		const char *node_name = ofnode_get_name(node);
  
-+	//_occamy_puts("dm_scan_fdt_node : \n");
++		debug("dm_scan_fdt_node: node name =  \"%s\"\n", node_name);
 +
- 	if (!ofnode_valid(parent_node))
- 		return 0;
- 
+ 		if (!ofnode_is_enabled(node)) {
+-			pr_debug("   - ignoring disabled device\n");
++			debug("   - ignoring disabled device\n");
+ 			continue;
+ 		}
+ 		err = lists_bind_fdt(parent, node, NULL, pre_reloc_only);
+@@ -400,7 +402,7 @@ int dm_init_and_scan(bool pre_reloc_only)
+ 	if (!CONFIG_IS_ENABLED(OF_PLATDATA_INST)) {
+ 		ret = dm_scan(pre_reloc_only);
+ 		if (ret) {
+-			log_debug("dm_scan() failed: %d\n", ret);
++			debug("dm_scan() failed: %d\n", ret);
+ 			return ret;
+ 		}
+ 	}
 diff --git a/include/configs/pulp-platform_occamy.h b/include/configs/pulp-platform_occamy.h
 new file mode 100644
 index 0000000000..b64000ffef
@@ -569,6 +758,22 @@ index 0000000000..b64000ffef
 +#define CONFIG_SYS_MAX_FLASH_BANKS 1
 +#define CONFIG_SYS_FLASH_BASE 0x0
 +#endif
+diff --git a/include/init.h b/include/init.h
+index fd51d7f966..287b796576 100644
+--- a/include/init.h
++++ b/include/init.h
+@@ -10,6 +10,11 @@
+ #ifndef __INIT_H_
+ #define __INIT_H_	1
+ 
++#define OCCAMY_LOG_BASE (0xb9000000)
++
++int _occamy_puts (const char *msg);
++int _occamy_putc (const char c);
++
+ #ifndef __ASSEMBLY__		/* put C only stuff in this section */
+ 
+ #include <linux/types.h>
 diff --git a/include/log.h b/include/log.h
 index add3a1e4a0..6dbf59c38b 100644
 --- a/include/log.h
@@ -594,6 +799,84 @@ index add3a1e4a0..6dbf59c38b 100644
  #ifdef DEBUG
  #define _DEBUG	1
  #else
+diff --git a/lib/display_options.c b/lib/display_options.c
+index cd48998b6d..cb7cdb6bfb 100644
+--- a/lib/display_options.c
++++ b/lib/display_options.c
+@@ -153,7 +153,7 @@ int print_buffer(ulong addr, const void *data, uint width, uint count,
+ 
+ 	while (count) {
+ 		uint thislinelen = linelen;
+-		printf("%08lx:", addr);
++		debug("%08lx:", addr);
+ 
+ 		/* check for overflow condition */
+ 		if (count < thislinelen)
+@@ -170,16 +170,16 @@ int print_buffer(ulong addr, const void *data, uint width, uint count,
+ 			else
+ 				x = lb.uc[i] = *(volatile uint8_t *)data;
+ 			if (CONFIG_IS_ENABLED(USE_TINY_PRINTF))
+-				printf(" %x", (uint)x);
++				debug(" %x", (uint)x);
+ 			else
+-				printf(" %0*lx", width * 2, x);
++				debug(" %0*lx", width * 2, x);
+ 			data += width;
+ 		}
+ 
+ 		while (thislinelen < linelen) {
+ 			/* fill line with whitespace for nice ASCII print */
+ 			for (i=0; i<width*2+1; i++)
+-				puts(" ");
++				debug(" ");
+ 			linelen--;
+ 		}
+ 
+@@ -189,7 +189,7 @@ int print_buffer(ulong addr, const void *data, uint width, uint count,
+ 				lb.uc[i] = '.';
+ 		}
+ 		lb.uc[i] = '\0';
+-		printf("    %s\n", lb.uc);
++		debug("    %s\n", lb.uc);
+ 
+ 		/* update references */
+ 		addr += thislinelen * width;
+diff --git a/lib/fdtdec.c b/lib/fdtdec.c
+index 4b097fb588..0869e514b9 100644
+--- a/lib/fdtdec.c
++++ b/lib/fdtdec.c
+@@ -596,16 +596,18 @@ int fdtdec_check_fdt(void)
+  */
+ int fdtdec_prepare_fdt(void)
+ {
++	int header;
+ 	if (!gd->fdt_blob || ((uintptr_t)gd->fdt_blob & 3) ||
+-	    fdt_check_header(gd->fdt_blob)) {
++	    (header = fdt_check_header(gd->fdt_blob))) {
++		debug("fdt_check_header: return code = %d\n", header);
+ #ifdef CONFIG_SPL_BUILD
+-		puts("Missing DTB\n");
++		debug("Missing DTB\n");
+ #else
+-		printf("No valid device tree binary found at %p\n",
++		debug("No valid device tree binary found at %p\n",
+ 		       gd->fdt_blob);
+ # ifdef DEBUG
+ 		if (gd->fdt_blob) {
+-			printf("fdt_blob=%p\n", gd->fdt_blob);
++			debug("fdt_blob=%p\n", gd->fdt_blob);
+ 			print_buffer((ulong)gd->fdt_blob, gd->fdt_blob, 4,
+ 				     32, 0);
+ 		}
+@@ -1609,6 +1611,8 @@ int fdtdec_setup(void)
+ # endif
+ #endif
+ 
++	debug("fdtdec_setup: gd->fdt_blob = %p\n", gd->fdt_blob);
++
+ 	ret = fdtdec_prepare_fdt();
+ 	if (!ret)
+ 		ret = fdtdec_board_setup(gd->fdt_blob);
 diff --git a/lib/tiny-printf.c b/lib/tiny-printf.c
 index 8fc7e48d99..60d56fbcbc 100644
 --- a/lib/tiny-printf.c
