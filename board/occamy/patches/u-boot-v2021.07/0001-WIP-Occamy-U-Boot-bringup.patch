@@ -1,4 +1,4 @@
-From 5031cd7c0eb4999031b13b3b4308074603eebb61 Mon Sep 17 00:00:00 2001
+From 10e5e092f8f1d0720f3684b94d3c203e61b92b9b Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -8,19 +8,22 @@ Subject: [PATCH] Patch
  arch/riscv/Kconfig                      |   4 +
  arch/riscv/dts/Makefile                 |   1 +
  arch/riscv/dts/occamy-u-boot.dtsi       |   1 +
- arch/riscv/dts/occamy.dts               | 165 ++++++++++++++++++++++++
+ arch/riscv/dts/occamy.dts               | 149 ++++++++++++++++++++
+ arch/riscv/lib/fdt_fixup.c              |   4 +-
  board/pulp-platform/occamy/Kconfig      |  31 +++++
  board/pulp-platform/occamy/Makefile     |   5 +
  board/pulp-platform/occamy/occamy.c     |   5 +
  board/pulp-platform/occamy/occamy_spl.c |  46 +++++++
  common/board_f.c                        |  71 +++++-----
- common/console.c                        |  49 +++++++
+ common/bootm.c                          |   3 +-
+ common/console.c                        |  83 +++++++++++
+ common/image.c                          |   5 +-
  common/init/board_init.c                |   8 ++
  common/spl/spl.c                        |   6 +-
  common/spl/spl_fit.c                    |   7 +-
  common/spl/spl_opensbi.c                |  10 +-
  common/xyzModem.c                       |   2 +
- configs/pulp-platform_occamy_defconfig  |  79 ++++++++++++
+ configs/pulp-platform_occamy_defconfig  |  79 +++++++++++
  drivers/core/lists.c                    |  19 +--
  drivers/core/root.c                     |   6 +-
  include/configs/pulp-platform_occamy.h  |  39 ++++++
@@ -28,10 +31,10 @@ Subject: [PATCH] Patch
  include/initcall.h                      |   6 +-
  include/log.h                           |   4 +
  lib/display_options.c                   |  10 +-
- lib/fdtdec.c                            | 148 ++++++++++-----------
+ lib/fdtdec.c                            | 174 +++++++++++++-----------
  lib/time.c                              |   4 +-
  lib/tiny-printf.c                       |   6 +-
- 27 files changed, 605 insertions(+), 134 deletions(-)
+ 30 files changed, 651 insertions(+), 144 deletions(-)
  create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
  create mode 100644 arch/riscv/dts/occamy.dts
  create mode 100644 board/pulp-platform/occamy/Kconfig
@@ -97,10 +100,10 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..6a66da46be
+index 0000000000..35ca47bf59
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
-@@ -0,0 +1,165 @@
+@@ -0,0 +1,149 @@
 +// Copyright 2021 ETH Zurich and University of Bologna.
 +// Licensed under the Apache License, Version 2.0, see LICENSE for details.
 +// SPDX-License-Identifier: Apache-2.0
@@ -121,7 +124,7 @@ index 0000000000..6a66da46be
 +  };
 +  memory@80000000 {
 +    device_type = "memory";
-+    reg = <0x0 0x80000000 0x0 0x10000000>;
++    reg = <0x0 0x80000000 0x0 0x20000000>;
 +  };
 +  // Create a reserved memory region for Snitch program memory
 +  reserved-memory {
@@ -193,22 +196,6 @@ index 0000000000..6a66da46be
 +      reg = <0x00000000 0x2006000 0x00000000 0x00001000>;
 +      reg-names = "control";
 +    };
-+    ramdisk@0 {
-+      partition@a0000000 {
-+        label = "u-boot";
-+        reg = <0xa0000000 0x100000>; // 1 MB
-+        read-only;
-+      };
-+      uimage@a0100000 {
-+        label = "uimage";
-+        reg = <0xa0100000 0x1000000>; // 16 MB
-+        read-only;
-+      };
-+      partition@a1100000 {
-+        label = "filesystem";
-+        reg = <0xa1100000 0x8f00000>; // 143 MB
-+      };
-+    };
 +    clint0: clint@4000000 {
 +      clock-frequency = <12500000>;
 +      compatible = "riscv,clint0";
@@ -266,6 +253,22 @@ index 0000000000..6a66da46be
 +    };
 +  };
 +};
+diff --git a/arch/riscv/lib/fdt_fixup.c b/arch/riscv/lib/fdt_fixup.c
+index f636b28449..874a75956e 100644
+--- a/arch/riscv/lib/fdt_fixup.c
++++ b/arch/riscv/lib/fdt_fixup.c
+@@ -166,8 +166,10 @@ int arch_fixup_fdt(void *blob)
+ 
+ 	/* Copy the reserved-memory node to the DT used by OS */
+ 	err = riscv_fdt_copy_resv_mem_node(gd->fdt_blob, blob);
+-	if (err < 0)
++	if (err < 0) {
++		log_err("chosen node cannot be copied\n");
+ 		return err;
++	}
+ 
+ 	return 0;
+ }
 diff --git a/board/pulp-platform/occamy/Kconfig b/board/pulp-platform/occamy/Kconfig
 new file mode 100644
 index 0000000000..12e0bebe42
@@ -658,49 +661,84 @@ index 203e965799..ded367c493 100644
  	 * UART if available.
  	 *
  	 * Do the same with log drivers since the memory may not be available.
+diff --git a/common/bootm.c b/common/bootm.c
+index ea71522d0c..8955132af7 100644
+--- a/common/bootm.c
++++ b/common/bootm.c
+@@ -871,6 +871,7 @@ static const void *boot_get_kernel(struct cmd_tbl *cmdtp, int flag, int argc,
+ 	/* check image type, for FIT images get FIT kernel node */
+ 	*os_data = *os_len = 0;
+ 	buf = map_sysmem(img_addr, 0);
++	printf("%s: Image format = %d\n", __func__, genimg_get_format(buf));
+ 	switch (genimg_get_format(buf)) {
+ #if CONFIG_IS_ENABLED(LEGACY_IMAGE_FORMAT)
+ 	case IMAGE_FORMAT_LEGACY:
+@@ -941,7 +942,7 @@ static const void *boot_get_kernel(struct cmd_tbl *cmdtp, int flag, int argc,
+ 		break;
+ #endif
+ 	default:
+-		printf("Wrong Image Format for %s command\n", cmdtp->name);
++		printf("%s: Wrong Image Format for %s command\n", __func__, cmdtp->name);
+ 		bootstage_error(BOOTSTAGE_ID_FIT_KERNEL_INFO);
+ 		return NULL;
+ 	}
 diff --git a/common/console.c b/common/console.c
-index 561cdf36a7..d87c1ec4cc 100644
+index 561cdf36a7..f4c724491c 100644
 --- a/common/console.c
 +++ b/common/console.c
-@@ -24,6 +24,52 @@
+@@ -24,6 +24,79 @@
  
  DECLARE_GLOBAL_DATA_PTR;
  
 +#define OCCAMY_LOG_BASE (0xb9000000)
++#define OCCAMY_IO_MAX_SIZE (1 * 1024 * 512)
 +
-+static unsigned int get_log_size(void) {
-+	unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
++#define OCCAMY_INPUT_BASE (OCCAMY_LOG_BASE + OCCAMY_IO_MAX_SIZE)
++#define OCCAMY_INPUT_MAX_SIZE (1 * 1024 * 512)
++
++static unsigned int get_IO_size(unsigned int base) {
++	unsigned int *_log_size = (unsigned int *)(base);
 +	return *_log_size;
 +}
 +
-+static void set_log_size(unsigned int size) {
-+	unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
++static void set_IO_size(unsigned int base, int size) {
++	int *_log_size = (int *)(base);
 +	*_log_size = *_log_size + size;
 +}
 +
-+static char *get_log_ptr (void) {
-+	char *_log_ptr = (char *)(OCCAMY_LOG_BASE + 8 + get_log_size());
++static char *get_IO_ptr (unsigned int base, unsigned int *size_remaining) {
++	unsigned int log_size = get_IO_size(base);
++	if (size_remaining) {
++		*size_remaining = (OCCAMY_IO_MAX_SIZE - 8 - log_size);
++	}
++	char *_log_ptr = (char *)(base + 8 + log_size);
 +	return _log_ptr;
 +}
 +
 +static int __occamy_putc (const char c) {
 +	//Magic
-+	char *log = get_log_ptr();
++	unsigned int size_remaining;
++	char *log = get_IO_ptr(OCCAMY_LOG_BASE, &size_remaining);
++	if (size_remaining == 0) {
++		return 0;
++	}
 +	*log = c;
-+	set_log_size(1);
++	set_IO_size(OCCAMY_LOG_BASE, 1);
 +	return 0;
 +}
 +
 +static int __occamy_puts (const char *msg) {
 +	unsigned int char_cnt = 0;
-+	char *log = get_log_ptr();
-+	while (*msg) {
++	unsigned int size_remaining;
++	char *log = get_IO_ptr(OCCAMY_LOG_BASE, &size_remaining);
++	while (*msg && size_remaining) {
 +		*log = *msg;
 +		log++;
 +		msg++;
 +		char_cnt++;
++		size_remaining--;
 +	}
-+	set_log_size(char_cnt);
++	set_IO_size(OCCAMY_LOG_BASE, char_cnt);
 +	return 0;
 +}
 +
@@ -712,10 +750,37 @@ index 561cdf36a7..d87c1ec4cc 100644
 +	return __occamy_putc(c);
 +}
 +
++//Strings come in reversed order
++int _occamy_fgetc (void) {
++	char c;
++	unsigned int size = get_IO_size(OCCAMY_INPUT_BASE);
++	if (!size) {
++		return 0;
++	}
++	char *ptr = get_IO_ptr(OCCAMY_INPUT_BASE, NULL) - 1;
++	c = *ptr;
++	set_IO_size(OCCAMY_INPUT_BASE, -1);
++	return (int)c;
++}
++
  static int on_console(const char *name, const char *value, enum env_op op,
  	int flags)
  {
-@@ -640,6 +686,7 @@ static inline void print_pre_console_buffer(int flushpoint) {}
+@@ -466,6 +539,13 @@ int serial_printf(const char *fmt, ...)
+ 
+ int fgetc(int file)
+ {
++	int occamy_c;
++	do {
++		occamy_c = _occamy_fgetc();
++	} while (occamy_c == 0);
++	
++	return occamy_c;
++
+ 	if (file < MAX_FILES) {
+ 		/*
+ 		 * Effectively poll for input wherever it may be available.
+@@ -640,6 +720,7 @@ static inline void print_pre_console_buffer(int flushpoint) {}
  
  void putc(const char c)
  {
@@ -723,7 +788,7 @@ index 561cdf36a7..d87c1ec4cc 100644
  	if (!gd)
  		return;
  
-@@ -681,6 +728,8 @@ void putc(const char c)
+@@ -681,6 +762,8 @@ void putc(const char c)
  
  void puts(const char *s)
  {
@@ -731,6 +796,35 @@ index 561cdf36a7..d87c1ec4cc 100644
 +
  	if (!gd)
  		return;
+ 
+diff --git a/common/image.c b/common/image.c
+index 51854aae5d..14884019c4 100644
+--- a/common/image.c
++++ b/common/image.c
+@@ -1097,6 +1097,7 @@ ulong genimg_get_kernel_addr(char * const img_addr)
+  */
+ int genimg_get_format(const void *img_addr)
+ {
++	int err = 0;
+ #if CONFIG_IS_ENABLED(LEGACY_IMAGE_FORMAT)
+ 	const image_header_t *hdr;
+ 
+@@ -1105,14 +1106,14 @@ int genimg_get_format(const void *img_addr)
+ 		return IMAGE_FORMAT_LEGACY;
+ #endif
+ #if IMAGE_ENABLE_FIT || IMAGE_ENABLE_OF_LIBFDT
+-	if (fdt_check_header(img_addr) == 0)
++	if ((err = fdt_check_header(img_addr)) == 0)
+ 		return IMAGE_FORMAT_FIT;
+ #endif
+ #ifdef CONFIG_ANDROID_BOOT_IMAGE
+ 	if (android_image_check_header(img_addr) == 0)
+ 		return IMAGE_FORMAT_ANDROID;
+ #endif
+-
++	printf("%s: error = %d\n", __func__, err);
+ 	return IMAGE_FORMAT_INVALID;
+ }
  
 diff --git a/common/init/board_init.c b/common/init/board_init.c
 index 3f183ee113..ba969a9621 100644
@@ -1190,7 +1284,7 @@ index cd48998b6d..cb7cdb6bfb 100644
  		/* update references */
  		addr += thislinelen * width;
 diff --git a/lib/fdtdec.c b/lib/fdtdec.c
-index 4b097fb588..939fbad8fd 100644
+index 4b097fb588..3a35d707e8 100644
 --- a/lib/fdtdec.c
 +++ b/lib/fdtdec.c
 @@ -95,11 +95,11 @@ fdt_addr_t fdtdec_get_addr_size_fixed(const void *blob, int node,
@@ -1589,7 +1683,25 @@ index 4b097fb588..939fbad8fd 100644
  
  	return 0;
  }
-@@ -1367,7 +1369,7 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+@@ -1341,12 +1343,16 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+ 	fdt_size_t size;
+ 	char name[64];
+ 
++	log_debug("%s\n", __func__);
++
+ 	/* create an empty /reserved-memory node if one doesn't exist */
+ 	parent = fdt_path_offset(blob, "/reserved-memory");
+ 	if (parent < 0) {
+ 		parent = fdtdec_init_reserved_memory(blob);
+-		if (parent < 0)
++		if (parent < 0) {
++			log_debug("Failed: fdtdec_init_reserved_memory\n");
+ 			return parent;
++		}
+ 	}
+ 
+ 	/* only 1 or 2 #address-cells and #size-cells are supported */
+@@ -1367,7 +1373,7 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
  		addr = fdtdec_get_addr_size_fixed(blob, node, "reg", 0, na, ns,
  						  &size, false);
  		if (addr == FDT_ADDR_T_NONE) {
@@ -1598,7 +1710,7 @@ index 4b097fb588..939fbad8fd 100644
  			continue;
  		}
  
-@@ -1391,7 +1393,7 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+@@ -1391,7 +1397,7 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
  			 lower);
  	else {
  		if (upper > 0) {
@@ -1607,7 +1719,54 @@ index 4b097fb588..939fbad8fd 100644
  			      upper, lower);
  			return -FDT_ERR_BADVALUE;
  		}
-@@ -1460,17 +1462,17 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
+@@ -1400,17 +1406,23 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+ 	}
+ 
+ 	node = fdt_add_subnode(blob, parent, name);
+-	if (node < 0)
++	if (node < 0) {
++		log_debug("Failed: fdt_add_subnode; error = %d\n", node);
+ 		return node;
++	}
+ 
+ 	if (phandlep) {
+ 		err = fdt_generate_phandle(blob, &phandle);
+-		if (err < 0)
++		if (err < 0) {
++			log_debug("Failed: fdt_generate_phandle; error = %d\n", err);
+ 			return err;
++		}
+ 
+ 		err = fdtdec_set_phandle(blob, node, phandle);
+-		if (err < 0)
++		if (err < 0) {
++			log_debug("Failed: fdtdec_set_phandle; error = %d\n", err);
+ 			return err;
++		}
+ 	}
+ 
+ 	/* store one or two address cells */
+@@ -1430,13 +1442,17 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+ 	*ptr++ = cpu_to_fdt32(lower);
+ 
+ 	err = fdt_setprop(blob, node, "reg", cells, (na + ns) * sizeof(*cells));
+-	if (err < 0)
++	if (err < 0) {
++		log_debug("Failed: fdt_setprop; error = %d\n", err);
+ 		return err;
++	}
+ 
+ 	if (no_map) {
+ 		err = fdt_setprop(blob, node, "no-map", NULL, 0);
+-		if (err < 0)
++		if (err < 0) {
++			log_debug("Failed: fdt_setprop (no_map); error = %d\n", err);
+ 			return err;
++		}
+ 	}
+ 
+ 	/* return the phandle for the new node for the caller to use */
+@@ -1460,17 +1476,17 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
  
  	prop = fdt_getprop(blob, offset, name, &len);
  	if (!prop) {
@@ -1628,7 +1787,7 @@ index 4b097fb588..939fbad8fd 100644
  		return -FDT_ERR_BADPHANDLE;
  	}
  
-@@ -1478,7 +1480,7 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
+@@ -1478,7 +1494,7 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
  
  	offset = fdt_node_offset_by_phandle(blob, phandle);
  	if (offset < 0) {
@@ -1637,7 +1796,7 @@ index 4b097fb588..939fbad8fd 100644
  		return offset;
  	}
  
-@@ -1486,7 +1488,7 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
+@@ -1486,7 +1502,7 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
  							     "reg", 0, &size,
  							     true);
  	if (carveout->start == FDT_ADDR_T_NONE) {
@@ -1646,7 +1805,7 @@ index 4b097fb588..939fbad8fd 100644
  		return -FDT_ERR_NOTFOUND;
  	}
  
-@@ -1506,13 +1508,13 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
+@@ -1506,13 +1522,13 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
  
  	err = fdtdec_add_reserved_memory(blob, name, carveout, &phandle, false);
  	if (err < 0) {
@@ -1662,7 +1821,7 @@ index 4b097fb588..939fbad8fd 100644
  		return offset;
  	}
  
-@@ -1530,7 +1532,7 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
+@@ -1530,7 +1546,7 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
  					      (index + 1) * sizeof(value),
  					      &prop);
  		if (err < 0) {
@@ -1671,7 +1830,7 @@ index 4b097fb588..939fbad8fd 100644
  			      fdt_strerror(err));
  			return err;
  		}
-@@ -1541,7 +1543,7 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
+@@ -1541,7 +1557,7 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
  						  index * sizeof(value),
  						  &value, sizeof(value));
  	if (err < 0) {
@@ -1680,7 +1839,7 @@ index 4b097fb588..939fbad8fd 100644
  		      prop_name, node, fdt_strerror(err));
  		return err;
  	}
-@@ -1609,6 +1611,8 @@ int fdtdec_setup(void)
+@@ -1609,6 +1625,8 @@ int fdtdec_setup(void)
  # endif
  #endif
  
@@ -1689,7 +1848,7 @@ index 4b097fb588..939fbad8fd 100644
  	ret = fdtdec_prepare_fdt();
  	if (!ret)
  		ret = fdtdec_board_setup(gd->fdt_blob);
-@@ -1665,18 +1669,18 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+@@ -1665,18 +1683,18 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
  	int bank;
  	int len;
  
@@ -1711,7 +1870,7 @@ index 4b097fb588..939fbad8fd 100644
  		return -ENOENT;
  	}
  
-@@ -1695,11 +1699,11 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+@@ -1695,11 +1713,11 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
  		if (match_value >= 0 &&
  		    ((board_id & match_mask) == match_value)) {
  			/* Found matching mask */
@@ -1725,7 +1884,7 @@ index 4b097fb588..939fbad8fd 100644
  				return -EINVAL;
  			}
  			break;
-@@ -1716,7 +1720,7 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+@@ -1716,7 +1734,7 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
  
  	total_size = 0;
  	end = cell + len / 4 - addr_cells - size_cells;
@@ -1734,7 +1893,7 @@ index 4b097fb588..939fbad8fd 100644
  	for (bank = 0; bank < CONFIG_NR_DRAM_BANKS; bank++) {
  		if (cell > end)
  			break;
-@@ -1737,12 +1741,12 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+@@ -1737,12 +1755,12 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
  		if (auto_size) {
  			u64 new_size;
  
@@ -1750,7 +1909,7 @@ index 4b097fb588..939fbad8fd 100644
  				size = new_size;
  			}
  		}
-@@ -1752,7 +1756,7 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+@@ -1752,7 +1770,7 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
  		total_size += size;
  	}
  
