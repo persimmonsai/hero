@@ -1,9 +1,10 @@
-From 0041d11bd6ee525f4ad59034186c7fba1d83f644 Mon Sep 17 00:00:00 2001
+From 5031cd7c0eb4999031b13b3b4308074603eebb61 Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
-Date: Tue, 10 Oct 2023 13:04:27 +0200
+Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
 
 ---
+ arch/arc/lib/relocate.c                 |   2 +
  arch/riscv/Kconfig                      |   4 +
  arch/riscv/dts/Makefile                 |   1 +
  arch/riscv/dts/occamy-u-boot.dtsi       |   1 +
@@ -11,22 +12,26 @@ Subject: [PATCH] Patch
  board/pulp-platform/occamy/Kconfig      |  31 +++++
  board/pulp-platform/occamy/Makefile     |   5 +
  board/pulp-platform/occamy/occamy.c     |   5 +
- board/pulp-platform/occamy/occamy_spl.c |  70 ++++++++++
+ board/pulp-platform/occamy/occamy_spl.c |  46 +++++++
+ common/board_f.c                        |  71 +++++-----
+ common/console.c                        |  49 +++++++
  common/init/board_init.c                |   8 ++
- common/log.c                            |  19 +++
  common/spl/spl.c                        |   6 +-
- common/spl/spl_fit.c                    |   4 +-
+ common/spl/spl_fit.c                    |   7 +-
  common/spl/spl_opensbi.c                |  10 +-
- configs/pulp-platform_occamy_defconfig  |  77 +++++++++++
+ common/xyzModem.c                       |   2 +
+ configs/pulp-platform_occamy_defconfig  |  79 ++++++++++++
  drivers/core/lists.c                    |  19 +--
  drivers/core/root.c                     |   6 +-
  include/configs/pulp-platform_occamy.h  |  39 ++++++
  include/init.h                          |   5 +
- include/log.h                           |   7 +
+ include/initcall.h                      |   6 +-
+ include/log.h                           |   4 +
  lib/display_options.c                   |  10 +-
- lib/fdtdec.c                            |  12 +-
- lib/tiny-printf.c                       |  12 +-
- 22 files changed, 487 insertions(+), 29 deletions(-)
+ lib/fdtdec.c                            | 148 ++++++++++-----------
+ lib/time.c                              |   4 +-
+ lib/tiny-printf.c                       |   6 +-
+ 27 files changed, 605 insertions(+), 134 deletions(-)
  create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
  create mode 100644 arch/riscv/dts/occamy.dts
  create mode 100644 board/pulp-platform/occamy/Kconfig
@@ -36,6 +41,19 @@ Subject: [PATCH] Patch
  create mode 100644 configs/pulp-platform_occamy_defconfig
  create mode 100644 include/configs/pulp-platform_occamy.h
 
+diff --git a/arch/arc/lib/relocate.c b/arch/arc/lib/relocate.c
+index 7f531c95ee..694751616d 100644
+--- a/arch/arc/lib/relocate.c
++++ b/arch/arc/lib/relocate.c
+@@ -35,6 +35,8 @@ int clear_bss(void)
+ 
+ 	memset((void *)dst_addr, 0x00, len);
+ 
++	log_debug("clear_bss: done\\n");
++
+ 	return 0;
+ }
+ 
 diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
 index b3d7fd84ce..d193ea497d 100644
 --- a/arch/riscv/Kconfig
@@ -79,7 +97,7 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..25cb6bcdfc
+index 0000000000..6a66da46be
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
 @@ -0,0 +1,165 @@
@@ -103,7 +121,7 @@ index 0000000000..25cb6bcdfc
 +  };
 +  memory@80000000 {
 +    device_type = "memory";
-+    reg = <0x0 0x80000000 0x0 0x20000000>;
++    reg = <0x0 0x80000000 0x0 0x10000000>;
 +  };
 +  // Create a reserved memory region for Snitch program memory
 +  reserved-memory {
@@ -309,10 +327,10 @@ index 0000000000..d703634b1a
 +int ft_board_setup(void *fdt, struct bd_info *bd) { return 0; }
 diff --git a/board/pulp-platform/occamy/occamy_spl.c b/board/pulp-platform/occamy/occamy_spl.c
 new file mode 100644
-index 0000000000..8e7b36c8f8
+index 0000000000..6ab6cc129d
 --- /dev/null
 +++ b/board/pulp-platform/occamy/occamy_spl.c
-@@ -0,0 +1,70 @@
+@@ -0,0 +1,46 @@
 +#include <init.h>
 +#include <spl.h>
 +#include <misc.h>
@@ -348,22 +366,324 @@ index 0000000000..8e7b36c8f8
 +	return _ptr;
 +}
 +
-+unsigned int get_log_size(void) {
++void *memcpy(void *dest, const void *src, size_t size)
++{
++	unsigned char *dptr = dest;
++	const unsigned char *ptr = src;
++	const unsigned char *end = src + size;
++
++	while (ptr < end)
++		*dptr++ = *ptr++;
++
++	return dest;
++}
+\ No newline at end of file
+diff --git a/common/board_f.c b/common/board_f.c
+index 203e965799..ded367c493 100644
+--- a/common/board_f.c
++++ b/common/board_f.c
+@@ -149,7 +149,7 @@ static int display_text_info(void)
+ 	text_base = CONFIG_SYS_MONITOR_BASE;
+ #endif
+ 
+-	debug("U-Boot code: %08lX -> %08lX  BSS: -> %08lX\n",
++	log_debug("U-Boot code: %08lX -> %08lX  BSS: -> %08lX\n",
+ 	      text_base, bss_start, bss_end);
+ #endif
+ 
+@@ -165,7 +165,7 @@ static int print_resetinfo(void)
+ 
+ 	ret = uclass_first_device_err(UCLASS_SYSRESET, &dev);
+ 	if (ret) {
+-		debug("%s: No sysreset device found (error: %d)\n",
++		log_debug("%s: No sysreset device found (error: %d)\n",
+ 		      __func__, ret);
+ 		/* Not all boards have sysreset drivers available during early
+ 		 * boot, so don't fail if one can't be found.
+@@ -189,14 +189,14 @@ static int print_cpuinfo(void)
+ 
+ 	dev = cpu_get_current_dev();
+ 	if (!dev) {
+-		debug("%s: Could not get CPU device\n",
++		log_debug("%s: Could not get CPU device\n",
+ 		      __func__);
+ 		return -ENODEV;
+ 	}
+ 
+ 	ret = cpu_get_desc(dev, desc, sizeof(desc));
+ 	if (ret) {
+-		debug("%s: Could not get CPU description (err = %d)\n",
++		log_debug("%s: Could not get CPU description (err = %d)\n",
+ 		      dev->name, ret);
+ 		return ret;
+ 	}
+@@ -218,16 +218,16 @@ static int show_dram_config(void)
+ 	unsigned long long size;
+ 	int i;
+ 
+-	debug("\nRAM Configuration:\n");
++	log_debug("\nRAM Configuration:\n");
+ 	for (i = size = 0; i < CONFIG_NR_DRAM_BANKS; i++) {
+ 		size += gd->bd->bi_dram[i].size;
+-		debug("Bank #%d: %llx ", i,
++		log_debug("Bank #%d: %llx ", i,
+ 		      (unsigned long long)(gd->bd->bi_dram[i].start));
+-#ifdef DEBUG
++#ifdef log_debug
+ 		print_size(gd->bd->bi_dram[i].size, "\n");
+ #endif
+ 	}
+-	debug("\nDRAM:  ");
++	log_debug("\nDRAM:  ");
+ 
+ 	print_size(size, "");
+ 	board_add_ram_info(0);
+@@ -283,7 +283,7 @@ static int setup_spl_handoff(void)
+ #if CONFIG_IS_ENABLED(HANDOFF)
+ 	gd->spl_handoff = bloblist_find(BLOBLISTT_SPL_HANDOFF,
+ 					sizeof(struct spl_handoff));
+-	debug("Found SPL hand-off info %p\n", gd->spl_handoff);
++	log_debug("Found SPL hand-off info %p\n", gd->spl_handoff);
+ #endif
+ 
+ 	return 0;
+@@ -319,11 +319,11 @@ __weak ulong board_get_usable_ram_top(ulong total_size)
+ 
+ static int setup_dest_addr(void)
+ {
+-	debug("Monitor len: %08lX\n", gd->mon_len);
++	log_debug("Monitor len: %08lX\n", gd->mon_len);
+ 	/*
+ 	 * Ram is setup, size stored in gd !!
+ 	 */
+-	debug("Ram size: %08lX\n", (ulong)gd->ram_size);
++	log_debug("Ram size: %08lX\n", (ulong)gd->ram_size);
+ #if defined(CONFIG_SYS_MEM_TOP_HIDE)
+ 	/*
+ 	 * Subtract specified amount of memory to hide so that it won't
+@@ -343,7 +343,8 @@ static int setup_dest_addr(void)
+ 	gd->ram_top = gd->ram_base + get_effective_memsize();
+ 	gd->ram_top = board_get_usable_ram_top(gd->mon_len);
+ 	gd->relocaddr = gd->ram_top;
+-	debug("Ram top: %08lX\n", (ulong)gd->ram_top);
++	log_debug("Ram base: %08lX\n", (ulong)gd->ram_base);
++	log_debug("Ram top: %08lX\n", (ulong)gd->ram_top);
+ #if defined(CONFIG_MP) && (defined(CONFIG_MPC86xx) || defined(CONFIG_E500))
+ 	/*
+ 	 * We need to make sure the location we intend to put secondary core
+@@ -351,7 +352,7 @@ static int setup_dest_addr(void)
+ 	 */
+ 	if (gd->relocaddr > determine_mp_bootpg(NULL)) {
+ 		gd->relocaddr = determine_mp_bootpg(NULL);
+-		debug("Reserving MP boot page to %08lx\n", gd->relocaddr);
++		log_debug("Reserving MP boot page to %08lx\n", gd->relocaddr);
+ 	}
+ #endif
+ 	return 0;
+@@ -365,7 +366,7 @@ static int reserve_pram(void)
+ 
+ 	reg = env_get_ulong("pram", 10, CONFIG_PRAM);
+ 	gd->relocaddr -= (reg << 10);		/* size is in kB */
+-	debug("Reserving %ldk for protected RAM at %08lx\n", reg,
++	log_debug("Reserving %ldk for protected RAM at %08lx\n", reg,
+ 	      gd->relocaddr);
+ 	return 0;
+ }
+@@ -393,7 +394,7 @@ static int reserve_video(void)
+ 	ret = video_reserve(&addr);
+ 	if (ret)
+ 		return ret;
+-	debug("Reserving %luk for video at: %08lx\n",
++	log_debug("Reserving %luk for video at: %08lx\n",
+ 	      ((unsigned long)gd->relocaddr - addr) >> 10, addr);
+ 	gd->relocaddr = addr;
+ #elif defined(CONFIG_LCD)
+@@ -414,7 +415,7 @@ static int reserve_trace(void)
+ #ifdef CONFIG_TRACE
+ 	gd->relocaddr -= CONFIG_TRACE_BUFFER_SIZE;
+ 	gd->trace_buff = map_sysmem(gd->relocaddr, CONFIG_TRACE_BUFFER_SIZE);
+-	debug("Reserving %luk for trace data at: %08lx\n",
++	log_debug("Reserving %luk for trace data at: %08lx\n",
+ 	      (unsigned long)CONFIG_TRACE_BUFFER_SIZE >> 10, gd->relocaddr);
+ #endif
+ 
+@@ -435,7 +436,7 @@ static int reserve_uboot(void)
+ 		gd->relocaddr &= ~(65536 - 1);
+ 	#endif
+ 
+-		debug("Reserving %ldk for U-Boot at: %08lx\n",
++		log_debug("Reserving %ldk for U-Boot at: %08lx\n",
+ 		      gd->mon_len >> 10, gd->relocaddr);
+ 	}
+ 
+@@ -470,7 +471,7 @@ static int reserve_noncached(void)
+ 		MMU_SECTION_SIZE;
+ 	gd->start_addr_sp -= ALIGN(CONFIG_SYS_NONCACHED_MEMORY,
+ 				   MMU_SECTION_SIZE);
+-	debug("Reserving %dM for noncached_alloc() at: %08lx\n",
++	log_debug("Reserving %dM for noncached_alloc() at: %08lx\n",
+ 	      CONFIG_SYS_NONCACHED_MEMORY >> 20, gd->start_addr_sp);
+ 
+ 	return 0;
+@@ -481,7 +482,7 @@ static int reserve_noncached(void)
+ static int reserve_malloc(void)
+ {
+ 	gd->start_addr_sp = reserve_stack_aligned(TOTAL_MALLOC_LEN);
+-	debug("Reserving %dk for malloc() at: %08lx\n",
++	log_debug("Reserving %dk for malloc() at: %08lx\n",
+ 	      TOTAL_MALLOC_LEN >> 10, gd->start_addr_sp);
+ #ifdef CONFIG_SYS_NONCACHED_MEMORY
+ 	reserve_noncached();
+@@ -498,7 +499,7 @@ static int reserve_board(void)
+ 		gd->bd = (struct bd_info *)map_sysmem(gd->start_addr_sp,
+ 						      sizeof(struct bd_info));
+ 		memset(gd->bd, '\0', sizeof(struct bd_info));
+-		debug("Reserving %zu Bytes for Board Info at: %08lx\n",
++		log_debug("Reserving %zu Bytes for Board Info at: %08lx\n",
+ 		      sizeof(struct bd_info), gd->start_addr_sp);
+ 	}
+ 	return 0;
+@@ -508,7 +509,7 @@ static int reserve_global_data(void)
+ {
+ 	gd->start_addr_sp = reserve_stack_aligned(sizeof(gd_t));
+ 	gd->new_gd = (gd_t *)map_sysmem(gd->start_addr_sp, sizeof(gd_t));
+-	debug("Reserving %zu Bytes for Global Data at: %08lx\n",
++	log_debug("Reserving %zu Bytes for Global Data at: %08lx\n",
+ 	      sizeof(gd_t), gd->start_addr_sp);
+ 	return 0;
+ }
+@@ -526,7 +527,7 @@ static int reserve_fdt(void)
+ 
+ 			gd->start_addr_sp = reserve_stack_aligned(gd->fdt_size);
+ 			gd->new_fdt = map_sysmem(gd->start_addr_sp, gd->fdt_size);
+-			debug("Reserving %lu Bytes for FDT at: %08lx\n",
++			log_debug("Reserving %lu Bytes for FDT at: %08lx\n",
+ 			      gd->fdt_size, gd->start_addr_sp);
+ 		}
+ 	}
+@@ -541,7 +542,7 @@ static int reserve_bootstage(void)
+ 
+ 	gd->start_addr_sp = reserve_stack_aligned(size);
+ 	gd->new_bootstage = map_sysmem(gd->start_addr_sp, size);
+-	debug("Reserving %#x Bytes for bootstage at: %08lx\n", size,
++	log_debug("Reserving %#x Bytes for bootstage at: %08lx\n", size,
+ 	      gd->start_addr_sp);
+ #endif
+ 
+@@ -580,7 +581,7 @@ static int reserve_bloblist(void)
+ 
+ static int display_new_sp(void)
+ {
+-	debug("New Stack Pointer is: %08lx\n", gd->start_addr_sp);
++	log_debug("New Stack Pointer is: %08lx\n", gd->start_addr_sp);
+ 
+ 	return 0;
+ }
+@@ -639,7 +640,7 @@ static int reloc_bootstage(void)
+ 	if (gd->new_bootstage) {
+ 		int size = bootstage_get_size();
+ 
+-		debug("Copying bootstage from %p to %p, size %x\n",
++		log_debug("Copying bootstage from %p to %p, size %x\n",
+ 		      gd->bootstage, gd->new_bootstage, size);
+ 		memcpy(gd->new_bootstage, gd->bootstage, size);
+ 		gd->bootstage = gd->new_bootstage;
+@@ -658,7 +659,7 @@ static int reloc_bloblist(void)
+ 	if (gd->new_bloblist) {
+ 		int size = CONFIG_BLOBLIST_SIZE;
+ 
+-		debug("Copying bloblist from %p to %p, size %x\n",
++		log_debug("Copying bloblist from %p to %p, size %x\n",
+ 		      gd->bloblist, gd->new_bloblist, size);
+ 		bloblist_reloc(gd->new_bloblist, CONFIG_BLOBLIST_SIZE_RELOC,
+ 			       gd->bloblist, size);
+@@ -672,7 +673,7 @@ static int reloc_bloblist(void)
+ static int setup_reloc(void)
+ {
+ 	if (gd->flags & GD_FLG_SKIP_RELOC) {
+-		debug("Skipping relocation due to flag\n");
++		log_debug("Skipping relocation due to flag\n");
+ 		return 0;
+ 	}
+ 
+@@ -691,8 +692,8 @@ static int setup_reloc(void)
+ #endif
+ 	memcpy(gd->new_gd, (char *)gd, sizeof(gd_t));
+ 
+-	debug("Relocation Offset is: %08lx\n", gd->reloc_off);
+-	debug("Relocating to %08lx, new gd at %08lx, sp at %08lx\n",
++	log_debug("Relocation Offset is: %08lx\n", gd->reloc_off);
++	log_debug("Relocating to %08lx, new gd at %08lx, sp at %08lx\n",
+ 	      gd->relocaddr, (ulong)map_to_sysmem(gd->new_gd),
+ 	      gd->start_addr_sp);
+ 
+@@ -712,8 +713,12 @@ static int fix_fdt(void)
+ 
+ static int jump_to_copy(void)
+ {
+-	if (gd->flags & GD_FLG_SKIP_RELOC)
++	log_debug("%s\n", __func__);
++
++	if (gd->flags & GD_FLG_SKIP_RELOC) {
++		log_debug("%s : Skipping\n", __func__);
+ 		return 0;
++	}
+ 	/*
+ 	 * x86 is special, but in a nice way. It uses a trampoline which
+ 	 * enables the dcache if possible.
+@@ -755,7 +760,7 @@ static int initf_bootstage(void)
+ 
+ 		ret = bootstage_unstash(stash, CONFIG_BOOTSTAGE_STASH_SIZE);
+ 		if (ret && ret != -ENOENT) {
+-			debug("Failed to unstash bootstage: err=%d\n", ret);
++			log_debug("Failed to unstash bootstage: err=%d\n", ret);
+ 			return ret;
+ 		}
+ 	}
+@@ -850,7 +855,7 @@ static const init_fnc_t init_sequence_f[] = {
+ 	serial_init,		/* serial communications setup */
+ 	console_init_f,		/* stage 1 init of console */
+ 	display_options,	/* say that we are here */
+-	display_text_info,	/* show debugging info if required */
++	display_text_info,	/* show log_debugging info if required */
+ 	checkcpu,
+ #if defined(CONFIG_SYSRESET)
+ 	print_resetinfo,
+@@ -993,7 +998,7 @@ void board_init_f_r(void)
+ 
+ 	/*
+ 	 * The pre-relocation drivers may be using memory that has now gone
+-	 * away. Mark serial as unavailable - this will fall back to the debug
++	 * away. Mark serial as unavailable - this will fall back to the log_debug
+ 	 * UART if available.
+ 	 *
+ 	 * Do the same with log drivers since the memory may not be available.
+diff --git a/common/console.c b/common/console.c
+index 561cdf36a7..d87c1ec4cc 100644
+--- a/common/console.c
++++ b/common/console.c
+@@ -24,6 +24,52 @@
+ 
+ DECLARE_GLOBAL_DATA_PTR;
+ 
++#define OCCAMY_LOG_BASE (0xb9000000)
++
++static unsigned int get_log_size(void) {
 +	unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
 +	return *_log_size;
 +}
 +
-+void set_log_size(unsigned int size) {
++static void set_log_size(unsigned int size) {
 +	unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
 +	*_log_size = *_log_size + size;
 +}
 +
-+char *get_log_ptr (void) {
++static char *get_log_ptr (void) {
 +	char *_log_ptr = (char *)(OCCAMY_LOG_BASE + 8 + get_log_size());
 +	return _log_ptr;
 +}
 +
-+int _occamy_putc (const char c) {
++static int __occamy_putc (const char c) {
 +	//Magic
 +	char *log = get_log_ptr();
 +	*log = c;
@@ -371,7 +691,7 @@ index 0000000000..8e7b36c8f8
 +	return 0;
 +}
 +
-+int _occamy_puts (const char *msg) {
++static int __occamy_puts (const char *msg) {
 +	unsigned int char_cnt = 0;
 +	char *log = get_log_ptr();
 +	while (*msg) {
@@ -383,9 +703,37 @@ index 0000000000..8e7b36c8f8
 +	set_log_size(char_cnt);
 +	return 0;
 +}
-\ No newline at end of file
++
++int _occamy_puts (const char *msg) {
++	return __occamy_puts(msg);
++}
++
++int _occamy_putc (const char c) {
++	return __occamy_putc(c);
++}
++
+ static int on_console(const char *name, const char *value, enum env_op op,
+ 	int flags)
+ {
+@@ -640,6 +686,7 @@ static inline void print_pre_console_buffer(int flushpoint) {}
+ 
+ void putc(const char c)
+ {
++	__occamy_putc(c);
+ 	if (!gd)
+ 		return;
+ 
+@@ -681,6 +728,8 @@ void putc(const char c)
+ 
+ void puts(const char *s)
+ {
++	__occamy_puts(s);
++
+ 	if (!gd)
+ 		return;
+ 
 diff --git a/common/init/board_init.c b/common/init/board_init.c
-index 3f183ee113..c5ee064e4a 100644
+index 3f183ee113..ba969a9621 100644
 --- a/common/init/board_init.c
 +++ b/common/init/board_init.c
 @@ -87,6 +87,11 @@ ulong board_init_f_alloc_reserve(ulong top)
@@ -404,49 +752,12 @@ index 3f183ee113..c5ee064e4a 100644
  	 * Use gd_ptr, as gd may not be properly set yet.
  	 */
  
-+	clear_log_size();
++	//clear_log_size();
 +	_occamy_puts("board_init_f_init_reserve\n");
 +
  	gd_ptr = (struct global_data *)base;
  	/* zero the area */
  	memset(gd_ptr, '\0', sizeof(*gd));
-diff --git a/common/log.c b/common/log.c
-index ea407c6db9..25e73b1410 100644
---- a/common/log.c
-+++ b/common/log.c
-@@ -14,6 +14,24 @@
- 
- DECLARE_GLOBAL_DATA_PTR;
- 
-+#define OCCAMY_LOG_BASE (0xc0000000)
-+
-+static unsigned int *_log_size = (unsigned int *)(OCCAMY_LOG_BASE);
-+//static void *_log_base = (void*)(OCCAMY_LOG_BASE + sizeof(unsigned int));
-+static char *_log_ptr = (char *)(OCCAMY_LOG_BASE + 8);
-+
-+int _occamy_puts (const char *msg) {
-+	unsigned int char_cnt = 0;
-+	while (*msg) {
-+		*_log_ptr = *msg;
-+		_log_ptr++;
-+		msg++;
-+		char_cnt++;
-+	}
-+	*_log_size = *_log_size + char_cnt;
-+	return 0;
-+}
-+
- static const char *const log_cat_name[] = {
- 	"none",
- 	"arch",
-@@ -269,6 +287,7 @@ int _log(enum log_category_t cat, enum log_level_t level, const char *file,
- 			va_start(args, fmt);
- 			vsnprintf(buf, sizeof(buf), fmt, args);
- 			puts(buf);
-+			//_occamy_puts(buf);
- 			va_end(args);
- 		}
- 
 diff --git a/common/spl/spl.c b/common/spl/spl.c
 index a0a608fd77..b016d3014f 100644
 --- a/common/spl/spl.c
@@ -480,10 +791,10 @@ index a0a608fd77..b016d3014f 100644
  	case IH_OS_U_BOOT:
  		debug("Jumping to %s...\n", spl_phase_name(spl_next_phase()));
 diff --git a/common/spl/spl_fit.c b/common/spl/spl_fit.c
-index caddf51196..0acd204f98 100644
+index caddf51196..aed4fdd037 100644
 --- a/common/spl/spl_fit.c
 +++ b/common/spl/spl_fit.c
-@@ -312,11 +312,11 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
+@@ -312,17 +312,20 @@ static int spl_load_fit_image(struct spl_load_info *info, ulong sector,
  	}
  
  	if (CONFIG_IS_ENABLED(FIT_SIGNATURE)) {
@@ -497,6 +808,15 @@ index caddf51196..0acd204f98 100644
  	}
  
  	if (CONFIG_IS_ENABLED(FIT_IMAGE_POST_PROCESS))
+ 		board_fit_image_post_process(&src, &length);
+ 
+ 	load_ptr = map_sysmem(load_addr, length);
++
++	debug("******* %s : load_ptr = %p\n", __func__, load_ptr);
++
+ 	if (IS_ENABLED(CONFIG_SPL_GZIP) && image_comp == IH_COMP_GZIP) {
+ 		size = length;
+ 		if (gunzip(load_ptr, CONFIG_SYS_BOOTM_LEN, src, &size)) {
 diff --git a/common/spl/spl_opensbi.c b/common/spl/spl_opensbi.c
 index 1c0abf8553..b39199527e 100644
 --- a/common/spl/spl_opensbi.c
@@ -533,12 +853,25 @@ index 1c0abf8553..b39199527e 100644
  	opensbi_entry(gd->arch.boot_hart, (ulong)spl_image->fdt_addr,
  		      (ulong)&opensbi_info);
  }
+diff --git a/common/xyzModem.c b/common/xyzModem.c
+index fc3459ebba..d8d29d2e09 100644
+--- a/common/xyzModem.c
++++ b/common/xyzModem.c
+@@ -493,6 +493,8 @@ xyzModem_stream_read (char *buf, int size, int *err)
+ 
+   total = 0;
+   stat = xyzModem_cancel;
++
++  debug("xyzModem_stream_read\n");
+   /* Try and get 'size' bytes into the buffer */
+   while (!xyz.at_eof && (size > 0))
+     {
 diff --git a/configs/pulp-platform_occamy_defconfig b/configs/pulp-platform_occamy_defconfig
 new file mode 100644
-index 0000000000..6cd883e169
+index 0000000000..f6804829d4
 --- /dev/null
 +++ b/configs/pulp-platform_occamy_defconfig
-@@ -0,0 +1,77 @@
+@@ -0,0 +1,79 @@
 +CONFIG_RISCV=y
 +CONFIG_SYS_MALLOC_F_LEN=0x3000
 +#CONFIG_DM_GPIO is not set
@@ -616,6 +949,8 @@ index 0000000000..6cd883e169
 +CONFIG_CLINT_TIMER=y
 +#CONFIG_SPL_OS_BOOT is not set
 +CONFIG_FIT_SIGNATURE=y
++CONFIG_USE_TINY_PRINTF=y
++CONFIG_PRINTF=y
 \ No newline at end of file
 diff --git a/drivers/core/lists.c b/drivers/core/lists.c
 index e214306b90..b52377eace 100644
@@ -715,7 +1050,7 @@ index fe0562cd6f..f74f045e87 100644
  	}
 diff --git a/include/configs/pulp-platform_occamy.h b/include/configs/pulp-platform_occamy.h
 new file mode 100644
-index 0000000000..b64000ffef
+index 0000000000..d4ddc3d2c5
 --- /dev/null
 +++ b/include/configs/pulp-platform_occamy.h
 @@ -0,0 +1,39 @@
@@ -747,7 +1082,7 @@ index 0000000000..b64000ffef
 +#endif
 +
 +// OpenSBI is at 0x80000000
-+#define CONFIG_SYS_SDRAM_BASE		0xb0200000
++#define CONFIG_SYS_SDRAM_BASE		0x80200000
 +#define CONFIG_SYS_INIT_SP_ADDR		(CONFIG_SYS_SDRAM_BASE + SZ_2M)
 +
 +#define CONFIG_SYS_LOAD_ADDR		(CONFIG_SYS_SDRAM_BASE + SZ_2M)
@@ -774,21 +1109,34 @@ index fd51d7f966..287b796576 100644
  #ifndef __ASSEMBLY__		/* put C only stuff in this section */
  
  #include <linux/types.h>
+diff --git a/include/initcall.h b/include/initcall.h
+index 69ce268070..88704cd825 100644
+--- a/include/initcall.h
++++ b/include/initcall.h
+@@ -37,15 +37,15 @@ static inline int initcall_run_list(const init_fnc_t init_sequence[])
+ 		reloc_ofs = (unsigned long)image_base;
+ #endif
+ 		if (reloc_ofs)
+-			debug("initcall: %p (relocated to %p)\n",
++			log_debug("initcall: %p (relocated to %p)\n",
+ 					(char *)*init_fnc_ptr - reloc_ofs,
+ 					(char *)*init_fnc_ptr);
+ 		else
+-			debug("initcall: %p\n", (char *)*init_fnc_ptr - reloc_ofs);
++			log_debug("initcall: %p\n", (char *)*init_fnc_ptr - reloc_ofs);
+ 
+ 		ret = (*init_fnc_ptr)();
+ 		if (ret) {
+-			printf("initcall sequence %p failed at call %p (err=%d)\n",
++			log_debug("initcall sequence %p failed at call %p (err=%d)\n",
+ 			       init_sequence,
+ 			       (char *)*init_fnc_ptr - reloc_ofs, ret);
+ 			return -1;
 diff --git a/include/log.h b/include/log.h
-index add3a1e4a0..6dbf59c38b 100644
+index add3a1e4a0..5b39d21e51 100644
 --- a/include/log.h
 +++ b/include/log.h
-@@ -15,6 +15,9 @@
- #include <linux/bitops.h>
- #include <linux/list.h>
- 
-+int _occamy_putc (const char c);
-+int _occamy_puts (const char *msg);
-+
- struct cmd_tbl;
- 
- /**
-@@ -210,6 +213,10 @@ static inline int _log_nop(enum log_category_t cat, enum log_level_t level,
+@@ -210,6 +210,10 @@ static inline int _log_nop(enum log_category_t cat, enum log_level_t level,
  		      __func__, pr_fmt(_fmt), ##_args); \
  })
  
@@ -842,9 +1190,180 @@ index cd48998b6d..cb7cdb6bfb 100644
  		/* update references */
  		addr += thislinelen * width;
 diff --git a/lib/fdtdec.c b/lib/fdtdec.c
-index 4b097fb588..0869e514b9 100644
+index 4b097fb588..939fbad8fd 100644
 --- a/lib/fdtdec.c
 +++ b/lib/fdtdec.c
+@@ -95,11 +95,11 @@ fdt_addr_t fdtdec_get_addr_size_fixed(const void *blob, int node,
+ 	int len;
+ 	fdt_addr_t addr;
+ 
+-	debug("%s: %s: ", __func__, prop_name);
++	log_debug("%s: %s: ", __func__, prop_name);
+ 
+ 	prop = fdt_getprop(blob, node, prop_name, &len);
+ 	if (!prop) {
+-		debug("(not found)\n");
++		log_debug("(not found)\n");
+ 		return FDT_ADDR_T_NONE;
+ 	}
+ 	prop_end = prop + (len / sizeof(*prop));
+@@ -108,7 +108,7 @@ fdt_addr_t fdtdec_get_addr_size_fixed(const void *blob, int node,
+ 	prop_size = prop_addr + na;
+ 	prop_after_size = prop_size + ns;
+ 	if (prop_after_size > prop_end) {
+-		debug("(not enough data: expected >= %d cells, got %d cells)\n",
++		log_debug("(not enough data: expected >= %d cells, got %d cells)\n",
+ 		      (u32)(prop_after_size - prop), ((u32)(prop_end - prop)));
+ 		return FDT_ADDR_T_NONE;
+ 	}
+@@ -122,10 +122,10 @@ fdt_addr_t fdtdec_get_addr_size_fixed(const void *blob, int node,
+ 
+ 	if (sizep) {
+ 		*sizep = fdtdec_get_number(prop_size, ns);
+-		debug("addr=%08llx, size=%llx\n", (unsigned long long)addr,
++		log_debug("addr=%08llx, size=%llx\n", (unsigned long long)addr,
+ 		      (unsigned long long)*sizep);
+ 	} else {
+-		debug("addr=%08llx\n", (unsigned long long)addr);
++		log_debug("addr=%08llx\n", (unsigned long long)addr);
+ 	}
+ 
+ 	return addr;
+@@ -138,21 +138,21 @@ fdt_addr_t fdtdec_get_addr_size_auto_parent(const void *blob, int parent,
+ {
+ 	int na, ns;
+ 
+-	debug("%s: ", __func__);
++	log_debug("%s: ", __func__);
+ 
+ 	na = fdt_address_cells(blob, parent);
+ 	if (na < 1) {
+-		debug("(bad #address-cells)\n");
++		log_debug("(bad #address-cells)\n");
+ 		return FDT_ADDR_T_NONE;
+ 	}
+ 
+ 	ns = fdt_size_cells(blob, parent);
+ 	if (ns < 0) {
+-		debug("(bad #size-cells)\n");
++		log_debug("(bad #size-cells)\n");
+ 		return FDT_ADDR_T_NONE;
+ 	}
+ 
+-	debug("na=%d, ns=%d, ", na, ns);
++	log_debug("na=%d, ns=%d, ", na, ns);
+ 
+ 	return fdtdec_get_addr_size_fixed(blob, node, prop_name, index, na,
+ 					  ns, sizep, translate);
+@@ -165,11 +165,11 @@ fdt_addr_t fdtdec_get_addr_size_auto_noparent(const void *blob, int node,
+ {
+ 	int parent;
+ 
+-	debug("%s: ", __func__);
++	log_debug("%s: ", __func__);
+ 
+ 	parent = fdt_parent_offset(blob, node);
+ 	if (parent < 0) {
+-		debug("(no parent found)\n");
++		log_debug("(no parent found)\n");
+ 		return FDT_ADDR_T_NONE;
+ 	}
+ 
+@@ -384,7 +384,7 @@ int fdtdec_add_aliases_for_id(const void *blob, const char *name,
+ 			nodes[count++] = node;
+ 	}
+ 	if (node >= 0)
+-		debug("%s: warning: maxcount exceeded with alias '%s'\n",
++		log_debug("%s: warning: maxcount exceeded with alias '%s'\n",
+ 		      __func__, name);
+ 
+ 	/* Now find all the aliases */
+@@ -407,7 +407,7 @@ int fdtdec_add_aliases_for_id(const void *blob, const char *name,
+ 		/* Get the alias number */
+ 		number = simple_strtoul(path + name_len, NULL, 10);
+ 		if (number < 0 || number >= maxcount) {
+-			debug("%s: warning: alias '%s' is out of range\n",
++			log_debug("%s: warning: alias '%s' is out of range\n",
+ 			      __func__, path);
+ 			continue;
+ 		}
+@@ -421,7 +421,7 @@ int fdtdec_add_aliases_for_id(const void *blob, const char *name,
+ 			}
+ 
+ 		if (found == -1) {
+-			debug("%s: warning: alias '%s' points to a node "
++			log_debug("%s: warning: alias '%s' points to a node "
+ 				"'%s' that is missing or is not compatible "
+ 				" with '%s'\n", __func__, path,
+ 				fdt_get_name(blob, node, NULL),
+@@ -435,7 +435,7 @@ int fdtdec_add_aliases_for_id(const void *blob, const char *name,
+ 		 */
+ 		if (fdtdec_get_is_enabled(blob, node)) {
+ 			if (node_list[number]) {
+-				debug("%s: warning: alias '%s' requires that "
++				log_debug("%s: warning: alias '%s' requires that "
+ 				      "a node be placed in the list in a "
+ 				      "position which is already filled by "
+ 				      "node '%s'\n", __func__, path,
+@@ -481,7 +481,7 @@ int fdtdec_get_alias_seq(const void *blob, const char *base, int offset,
+ 	int aliases;
+ 
+ 	find_name = fdt_get_name(blob, offset, &find_namelen);
+-	debug("Looking for '%s' at %d, name %s\n", base, offset, find_name);
++	log_debug("Looking for '%s' at %d, name %s\n", base, offset, find_name);
+ 
+ 	aliases = fdt_path_offset(blob, "/aliases");
+ 	for (prop_offset = fdt_first_property_offset(blob, aliases);
+@@ -493,7 +493,7 @@ int fdtdec_get_alias_seq(const void *blob, const char *base, int offset,
+ 		int len, val;
+ 
+ 		prop = fdt_getprop_by_offset(blob, prop_offset, &name, &len);
+-		debug("   - %s, %s\n", name, prop);
++		log_debug("   - %s, %s\n", name, prop);
+ 		if (len < find_namelen || *prop != '/' || prop[len - 1] ||
+ 		    strncmp(name, base, base_len))
+ 			continue;
+@@ -515,12 +515,12 @@ int fdtdec_get_alias_seq(const void *blob, const char *base, int offset,
+ 		val = trailing_strtol(name);
+ 		if (val != -1) {
+ 			*seqp = val;
+-			debug("Found seq %d\n", *seqp);
++			log_debug("Found seq %d\n", *seqp);
+ 			return 0;
+ 		}
+ 	}
+ 
+-	debug("Not found\n");
++	log_debug("Not found\n");
+ 	return -ENOENT;
+ }
+ 
+@@ -531,7 +531,7 @@ int fdtdec_get_alias_highest_id(const void *blob, const char *base)
+ 	int aliases;
+ 	int max = -1;
+ 
+-	debug("Looking for highest alias id for '%s'\n", base);
++	log_debug("Looking for highest alias id for '%s'\n", base);
+ 
+ 	aliases = fdt_path_offset(blob, "/aliases");
+ 	for (prop_offset = fdt_first_property_offset(blob, aliases);
+@@ -542,14 +542,14 @@ int fdtdec_get_alias_highest_id(const void *blob, const char *base)
+ 		int len, val;
+ 
+ 		prop = fdt_getprop_by_offset(blob, prop_offset, &name, &len);
+-		debug("   - %s, %s\n", name, prop);
++		log_debug("   - %s, %s\n", name, prop);
+ 		if (*prop != '/' || prop[len - 1] ||
+ 		    strncmp(name, base, base_len))
+ 			continue;
+ 
+ 		val = trailing_strtol(name);
+ 		if (val > max) {
+-			debug("Found seq %d\n", val);
++			log_debug("Found seq %d\n", val);
+ 			max = val;
+ 		}
+ 	}
 @@ -596,16 +596,18 @@ int fdtdec_check_fdt(void)
   */
  int fdtdec_prepare_fdt(void)
@@ -853,65 +1372,424 @@ index 4b097fb588..0869e514b9 100644
  	if (!gd->fdt_blob || ((uintptr_t)gd->fdt_blob & 3) ||
 -	    fdt_check_header(gd->fdt_blob)) {
 +	    (header = fdt_check_header(gd->fdt_blob))) {
-+		debug("fdt_check_header: return code = %d\n", header);
++		log_debug("fdt_check_header: return code = %d\n", header);
  #ifdef CONFIG_SPL_BUILD
 -		puts("Missing DTB\n");
-+		debug("Missing DTB\n");
++		log_debug("Missing DTB\n");
  #else
 -		printf("No valid device tree binary found at %p\n",
-+		debug("No valid device tree binary found at %p\n",
++		log_debug("No valid device tree binary found at %p\n",
  		       gd->fdt_blob);
- # ifdef DEBUG
+-# ifdef DEBUG
++# ifdef log_debug
  		if (gd->fdt_blob) {
 -			printf("fdt_blob=%p\n", gd->fdt_blob);
-+			debug("fdt_blob=%p\n", gd->fdt_blob);
++			log_debug("fdt_blob=%p\n", gd->fdt_blob);
  			print_buffer((ulong)gd->fdt_blob, gd->fdt_blob, 4,
  				     32, 0);
  		}
+@@ -621,7 +623,7 @@ int fdtdec_lookup_phandle(const void *blob, int node, const char *prop_name)
+ 	const u32 *phandle;
+ 	int lookup;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	phandle = fdt_getprop(blob, node, prop_name, NULL);
+ 	if (!phandle)
+ 		return -FDT_ERR_NOTFOUND;
+@@ -648,7 +650,7 @@ static const void *get_prop_check_min_len(const void *blob, int node,
+ 	const void *cell;
+ 	int len;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	cell = fdt_getprop(blob, node, prop_name, &len);
+ 	if (!cell)
+ 		*err = -FDT_ERR_NOTFOUND;
+@@ -665,7 +667,7 @@ int fdtdec_get_int_array(const void *blob, int node, const char *prop_name,
+ 	const u32 *cell;
+ 	int err = 0;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	cell = get_prop_check_min_len(blob, node, prop_name,
+ 				      sizeof(u32) * count, &err);
+ 	if (!err) {
+@@ -684,7 +686,7 @@ int fdtdec_get_int_array_count(const void *blob, int node,
+ 	int len, elems;
+ 	int i;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	cell = fdt_getprop(blob, node, prop_name, &len);
+ 	if (!cell)
+ 		return -FDT_ERR_NOTFOUND;
+@@ -713,7 +715,7 @@ int fdtdec_get_bool(const void *blob, int node, const char *prop_name)
+ 	const s32 *cell;
+ 	int len;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	cell = fdt_getprop(blob, node, prop_name, &len);
+ 	return cell != NULL;
+ }
+@@ -760,7 +762,7 @@ int fdtdec_parse_phandle_with_args(const void *blob, int src_node,
+ 				node = fdt_node_offset_by_phandle(blob,
+ 								  phandle);
+ 				if (node < 0) {
+-					debug("%s: could not find phandle\n",
++					log_debug("%s: could not find phandle\n",
+ 					      fdt_get_name(blob, src_node,
+ 							   NULL));
+ 					goto err;
+@@ -771,7 +773,7 @@ int fdtdec_parse_phandle_with_args(const void *blob, int src_node,
+ 				count = fdtdec_get_int(blob, node, cells_name,
+ 						       -1);
+ 				if (count == -1) {
+-					debug("%s: could not get %s for %s\n",
++					log_debug("%s: could not get %s for %s\n",
+ 					      fdt_get_name(blob, src_node,
+ 							   NULL),
+ 					      cells_name,
+@@ -788,7 +790,7 @@ int fdtdec_parse_phandle_with_args(const void *blob, int src_node,
+ 			 * remaining property data length
+ 			 */
+ 			if (list + count > list_end) {
+-				debug("%s: arguments longer than property\n",
++				log_debug("%s: arguments longer than property\n",
+ 				      fdt_get_name(blob, src_node, NULL));
+ 				goto err;
+ 			}
+@@ -809,7 +811,7 @@ int fdtdec_parse_phandle_with_args(const void *blob, int src_node,
+ 				int i;
+ 
+ 				if (count > MAX_PHANDLE_ARGS) {
+-					debug("%s: too many arguments %d\n",
++					log_debug("%s: too many arguments %d\n",
+ 					      fdt_get_name(blob, src_node,
+ 							   NULL), count);
+ 					count = MAX_PHANDLE_ARGS;
+@@ -871,7 +873,7 @@ int fdtdec_get_config_int(const void *blob, const char *prop_name,
+ {
+ 	int config_node;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	config_node = fdt_path_offset(blob, "/config");
+ 	if (config_node < 0)
+ 		return default_val;
+@@ -883,7 +885,7 @@ int fdtdec_get_config_bool(const void *blob, const char *prop_name)
+ 	int config_node;
+ 	const void *prop;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	config_node = fdt_path_offset(blob, "/config");
+ 	if (config_node < 0)
+ 		return 0;
+@@ -898,7 +900,7 @@ char *fdtdec_get_config_string(const void *blob, const char *prop_name)
+ 	int nodeoffset;
+ 	int len;
+ 
+-	debug("%s: %s\n", __func__, prop_name);
++	log_debug("%s: %s\n", __func__, prop_name);
+ 	nodeoffset = fdt_path_offset(blob, "/config");
+ 	if (nodeoffset < 0)
+ 		return NULL;
+@@ -980,7 +982,7 @@ static int decode_timing_property(const void *blob, int node, const char *name,
+ 
+ 	prop = fdt_getprop(blob, node, name, &length);
+ 	if (!prop) {
+-		debug("%s: could not find property %s\n",
++		log_debug("%s: could not find property %s\n",
+ 		      fdt_get_name(blob, node, NULL), name);
+ 		return length;
+ 	}
+@@ -1072,20 +1074,20 @@ int fdtdec_setup_mem_size_base(void)
+ 
+ 	mem = ofnode_path("/memory");
+ 	if (!ofnode_valid(mem)) {
+-		debug("%s: Missing /memory node\n", __func__);
++		log_debug("%s: Missing /memory node\n", __func__);
+ 		return -EINVAL;
+ 	}
+ 
+ 	ret = ofnode_read_resource(mem, 0, &res);
+ 	if (ret != 0) {
+-		debug("%s: Unable to decode first memory bank\n", __func__);
++		log_debug("%s: Unable to decode first memory bank\n", __func__);
+ 		return -EINVAL;
+ 	}
+ 
+ 	gd->ram_size = (phys_size_t)(res.end - res.start + 1);
+ 	gd->ram_base = (unsigned long)res.start;
+-	debug("%s: Initial DRAM size %llx\n", __func__,
+-	      (unsigned long long)gd->ram_size);
++	log_debug("%s: Initial DRAM size %llx, DRAM base = %llx\n", __func__,
++	      (unsigned long long)gd->ram_size, (unsigned long long)res.start);
+ 
+ 	return 0;
+ }
+@@ -1107,7 +1109,7 @@ int fdtdec_setup_memory_banksize(void)
+ 
+ 	mem = get_next_memory_node(mem);
+ 	if (!ofnode_valid(mem)) {
+-		debug("%s: Missing /memory node\n", __func__);
++		log_debug("%s: Missing /memory node\n", __func__);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -1131,7 +1133,7 @@ int fdtdec_setup_memory_banksize(void)
+ 		gd->bd->bi_dram[bank].size =
+ 			(phys_size_t)(res.end - res.start + 1);
+ 
+-		debug("%s: DRAM Bank #%d: start = 0x%llx, size = 0x%llx\n",
++		log_debug("%s: DRAM Bank #%d: start = 0x%llx, size = 0x%llx\n",
+ 		      __func__, bank,
+ 		      (unsigned long long)gd->bd->bi_dram[bank].start,
+ 		      (unsigned long long)gd->bd->bi_dram[bank].size);
+@@ -1152,7 +1154,7 @@ int fdtdec_setup_mem_size_base_lowest(void)
+ 
+ 	mem = get_next_memory_node(mem);
+ 	if (!ofnode_valid(mem)) {
+-		debug("%s: Missing /memory node\n", __func__);
++		log_debug("%s: Missing /memory node\n", __func__);
+ 		return -EINVAL;
+ 	}
+ 
+@@ -1178,7 +1180,7 @@ int fdtdec_setup_mem_size_base_lowest(void)
+ 		if (gd->ram_base > base && size) {
+ 			gd->ram_base = base;
+ 			gd->ram_size = size;
+-			debug("%s: Initial DRAM base %lx size %lx\n",
++			log_debug("%s: Initial DRAM base %lx size %lx\n",
+ 			      __func__, base, (unsigned long)size);
+ 		}
+ 	}
+@@ -1282,11 +1284,11 @@ int fdtdec_set_ethernet_mac_address(void *fdt, const u8 *mac, size_t size)
+ 	if (!path)
+ 		return 0;
+ 
+-	debug("ethernet alias found: %s\n", path);
++	log_debug("ethernet alias found: %s\n", path);
+ 
+ 	offset = fdt_path_offset(fdt, path);
+ 	if (offset < 0) {
+-		debug("ethernet alias points to absent node %s\n", path);
++		log_debug("ethernet alias points to absent node %s\n", path);
+ 		return -ENOENT;
+ 	}
+ 
+@@ -1294,7 +1296,7 @@ int fdtdec_set_ethernet_mac_address(void *fdt, const u8 *mac, size_t size)
+ 	if (err < 0)
+ 		return err;
+ 
+-	debug("MAC address: %pM\n", mac);
++	log_debug("MAC address: %pM\n", mac);
+ 
+ 	return 0;
+ }
+@@ -1367,7 +1369,7 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+ 		addr = fdtdec_get_addr_size_fixed(blob, node, "reg", 0, na, ns,
+ 						  &size, false);
+ 		if (addr == FDT_ADDR_T_NONE) {
+-			debug("failed to read address/size for %s\n", name);
++			log_debug("failed to read address/size for %s\n", name);
+ 			continue;
+ 		}
+ 
+@@ -1391,7 +1393,7 @@ int fdtdec_add_reserved_memory(void *blob, const char *basename,
+ 			 lower);
+ 	else {
+ 		if (upper > 0) {
+-			debug("address %08x:%08x exceeds addressable space\n",
++			log_debug("address %08x:%08x exceeds addressable space\n",
+ 			      upper, lower);
+ 			return -FDT_ERR_BADVALUE;
+ 		}
+@@ -1460,17 +1462,17 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
+ 
+ 	prop = fdt_getprop(blob, offset, name, &len);
+ 	if (!prop) {
+-		debug("failed to get %s for %s\n", name, node);
++		log_debug("failed to get %s for %s\n", name, node);
+ 		return -FDT_ERR_NOTFOUND;
+ 	}
+ 
+ 	if ((len % sizeof(phandle)) != 0) {
+-		debug("invalid phandle property\n");
++		log_debug("invalid phandle property\n");
+ 		return -FDT_ERR_BADPHANDLE;
+ 	}
+ 
+ 	if (len < (sizeof(phandle) * (index + 1))) {
+-		debug("invalid phandle index\n");
++		log_debug("invalid phandle index\n");
+ 		return -FDT_ERR_BADPHANDLE;
+ 	}
+ 
+@@ -1478,7 +1480,7 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
+ 
+ 	offset = fdt_node_offset_by_phandle(blob, phandle);
+ 	if (offset < 0) {
+-		debug("failed to find node for phandle %u\n", phandle);
++		log_debug("failed to find node for phandle %u\n", phandle);
+ 		return offset;
+ 	}
+ 
+@@ -1486,7 +1488,7 @@ int fdtdec_get_carveout(const void *blob, const char *node, const char *name,
+ 							     "reg", 0, &size,
+ 							     true);
+ 	if (carveout->start == FDT_ADDR_T_NONE) {
+-		debug("failed to read address/size from \"reg\" property\n");
++		log_debug("failed to read address/size from \"reg\" property\n");
+ 		return -FDT_ERR_NOTFOUND;
+ 	}
+ 
+@@ -1506,13 +1508,13 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
+ 
+ 	err = fdtdec_add_reserved_memory(blob, name, carveout, &phandle, false);
+ 	if (err < 0) {
+-		debug("failed to add reserved memory: %d\n", err);
++		log_debug("failed to add reserved memory: %d\n", err);
+ 		return err;
+ 	}
+ 
+ 	offset = fdt_path_offset(blob, node);
+ 	if (offset < 0) {
+-		debug("failed to find offset for node %s: %d\n", node, offset);
++		log_debug("failed to find offset for node %s: %d\n", node, offset);
+ 		return offset;
+ 	}
+ 
+@@ -1530,7 +1532,7 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
+ 					      (index + 1) * sizeof(value),
+ 					      &prop);
+ 		if (err < 0) {
+-			debug("failed to resize reserved memory property: %s\n",
++			log_debug("failed to resize reserved memory property: %s\n",
+ 			      fdt_strerror(err));
+ 			return err;
+ 		}
+@@ -1541,7 +1543,7 @@ int fdtdec_set_carveout(void *blob, const char *node, const char *prop_name,
+ 						  index * sizeof(value),
+ 						  &value, sizeof(value));
+ 	if (err < 0) {
+-		debug("failed to update %s property for node %s: %s\n",
++		log_debug("failed to update %s property for node %s: %s\n",
+ 		      prop_name, node, fdt_strerror(err));
+ 		return err;
+ 	}
 @@ -1609,6 +1611,8 @@ int fdtdec_setup(void)
  # endif
  #endif
  
-+	debug("fdtdec_setup: gd->fdt_blob = %p\n", gd->fdt_blob);
++	log_debug("fdtdec_setup: gd->fdt_blob = %p\n", gd->fdt_blob);
 +
  	ret = fdtdec_prepare_fdt();
  	if (!ret)
  		ret = fdtdec_board_setup(gd->fdt_blob);
+@@ -1665,18 +1669,18 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+ 	int bank;
+ 	int len;
+ 
+-	debug("%s: board_id=%d\n", __func__, board_id);
++	log_debug("%s: board_id=%d\n", __func__, board_id);
+ 	if (!area)
+ 		area = "/memory";
+ 	node = fdt_path_offset(blob, area);
+ 	if (node < 0) {
+-		debug("No %s node found\n", area);
++		log_debug("No %s node found\n", area);
+ 		return -ENOENT;
+ 	}
+ 
+ 	cell = fdt_getprop(blob, node, "reg", &len);
+ 	if (!cell) {
+-		debug("No reg property found\n");
++		log_debug("No reg property found\n");
+ 		return -ENOENT;
+ 	}
+ 
+@@ -1695,11 +1699,11 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+ 		if (match_value >= 0 &&
+ 		    ((board_id & match_mask) == match_value)) {
+ 			/* Found matching mask */
+-			debug("Found matching mask %d\n", match_mask);
++			log_debug("Found matching mask %d\n", match_mask);
+ 			node = child;
+ 			cell = fdt_getprop(blob, node, "reg", &len);
+ 			if (!cell) {
+-				debug("No memory-banks property found\n");
++				log_debug("No memory-banks property found\n");
+ 				return -EINVAL;
+ 			}
+ 			break;
+@@ -1716,7 +1720,7 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+ 
+ 	total_size = 0;
+ 	end = cell + len / 4 - addr_cells - size_cells;
+-	debug("cell at %p, end %p\n", cell, end);
++	log_debug("cell at %p, end %p\n", cell, end);
+ 	for (bank = 0; bank < CONFIG_NR_DRAM_BANKS; bank++) {
+ 		if (cell > end)
+ 			break;
+@@ -1737,12 +1741,12 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+ 		if (auto_size) {
+ 			u64 new_size;
+ 
+-			debug("Auto-sizing %llx, size %llx: ", addr, size);
++			log_debug("Auto-sizing %llx, size %llx: ", addr, size);
+ 			new_size = get_ram_size((long *)(uintptr_t)addr, size);
+ 			if (new_size == size) {
+-				debug("OK\n");
++				log_debug("OK\n");
+ 			} else {
+-				debug("sized to %llx\n", new_size);
++				log_debug("sized to %llx\n", new_size);
+ 				size = new_size;
+ 			}
+ 		}
+@@ -1752,7 +1756,7 @@ int fdtdec_decode_ram_size(const void *blob, const char *area, int board_id,
+ 		total_size += size;
+ 	}
+ 
+-	debug("Memory size %llu\n", total_size);
++	log_debug("Memory size %llu\n", total_size);
+ 	if (sizep)
+ 		*sizep = (phys_size_t)total_size;
+ 
+diff --git a/lib/time.c b/lib/time.c
+index 38a9758292..8a4b41e3ad 100644
+--- a/lib/time.c
++++ b/lib/time.c
+@@ -92,8 +92,10 @@ uint64_t notrace get_ticks(void)
+ 		int ret;
+ 
+ 		ret = dm_timer_init();
+-		if (ret)
++		if (ret) {
+ 			panic("Could not initialize timer (err %d)\n", ret);
++			while (1) {}
++		}
+ #endif
+ 	}
+ 
 diff --git a/lib/tiny-printf.c b/lib/tiny-printf.c
-index 8fc7e48d99..60d56fbcbc 100644
+index 8fc7e48d99..29f897d78f 100644
 --- a/lib/tiny-printf.c
 +++ b/lib/tiny-printf.c
-@@ -13,6 +13,9 @@
- #include <serial.h>
- #include <linux/ctype.h>
- 
-+int _occamy_putc (const char c);
-+int _occamy_puts (const char *msg);
-+
- struct printf_info {
- 	char *bf;	/* Digit buffer */
- 	char zs;	/* non-zero if a digit has been written */
-@@ -207,6 +210,7 @@ static int _vprintf(struct printf_info *info, const char *fmt, va_list va)
- 	while ((ch = *(fmt++))) {
- 		if (ch != '%') {
- 			info->putc(info, ch);
-+			_occamy_putc(ch);
- 		} else {
- 			bool lz = false;
- 			int width = 0;
-@@ -314,11 +318,15 @@ static int _vprintf(struct printf_info *info, const char *fmt, va_list va)
+@@ -314,11 +314,13 @@ static int _vprintf(struct printf_info *info, const char *fmt, va_list va)
  			info->bf = p;
  			while (*info->bf++ && width > 0)
  				width--;
 -			while (width-- > 0)
 +			while (width-- > 0) {
  				info->putc(info, lz ? '0' : ' ');
-+				_occamy_putc(lz ? '0' : ' ');
 +			}
  			if (p) {
 -				while ((ch = *p++))
 +				while ((ch = *p++)) {
-+					_occamy_putc(ch);
  					info->putc(info, ch);
 +				}
  			}
