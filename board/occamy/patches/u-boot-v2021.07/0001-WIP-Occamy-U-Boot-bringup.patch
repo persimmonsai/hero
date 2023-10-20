@@ -1,4 +1,4 @@
-From 10e5e092f8f1d0720f3684b94d3c203e61b92b9b Mon Sep 17 00:00:00 2001
+From 3d8aab6624d1681a8a8e64119cea3c0182eb85af Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -100,7 +100,7 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..35ca47bf59
+index 0000000000..aca6cddbbc
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
 @@ -0,0 +1,149 @@
@@ -117,7 +117,7 @@ index 0000000000..35ca47bf59
 +  compatible = "eth,occamy-dev";
 +  model = "eth,occamy";
 +  config {
-+    u-boot,spl-payload-offset = <0xa000000>;
++    u-boot,spl-payload-offset = <0xa0000000>;
 +  };
 +  chosen {
 +    stdout-path = "/soc/serial@2002000:115200";
@@ -161,10 +161,10 @@ index 0000000000..35ca47bf59
 +      };
 +    };
 +  };
-+  sysclk: virt_25mhz {
++  sysclk: virt_50mhz {
 +    #clock-cells = <0>;
 +    compatible = "fixed-clock";
-+    clock-frequency = <25000000>;
++    clock-frequency = <50000000>;
 +  };
 +  soc: soc {
 +    #address-cells = <2>;
@@ -180,7 +180,7 @@ index 0000000000..35ca47bf59
 +    serial@2002000 {
 +      compatible = "ns16550a";
 +      reg = <0x0 0x2002000 0x0 0x1000>;
-+      clock-frequency = <25000000>;
++      clock-frequency = <50000000>;
 +      current-speed = <115200>;
 +      interrupt-parent = <&PLIC0>;
 +      interrupts = <36>;
