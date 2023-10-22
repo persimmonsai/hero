@@ -1,29 +1,3 @@
-From Mon Sep 17 00:00:00 2001
-From: Noah Huetter <huettern@iis.ee.ethz.ch>
-Date: Wed, 04 May 2022 15:13:31 +0200
-Subject: Occamy U-Boot bringup
-
----
- arch/riscv/Kconfig                      |   4 +
- arch/riscv/dts/Makefile                 |   1 +
- arch/riscv/dts/occamy-u-boot.dtsi       |   1 +
- arch/riscv/dts/occamy.dts               | 131 ++++++++++++++++++++++++++++++++
- board/pulp-platform/occamy/Kconfig      |  31 ++++++++
- board/pulp-platform/occamy/Makefile     |   5 ++
- board/pulp-platform/occamy/occamy.c     |   5 ++
- board/pulp-platform/occamy/occamy_spl.c |  23 ++++++
- configs/pulp-platform_occamy_defconfig  |  75 ++++++++++++++++++
- include/configs/pulp-platform_occamy.h  |  39 ++++++++++
- 10 files changed, 315 insertions(+)
- create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
- create mode 100644 arch/riscv/dts/occamy.dts
- create mode 100644 board/pulp-platform/occamy/Kconfig
- create mode 100644 board/pulp-platform/occamy/Makefile
- create mode 100644 board/pulp-platform/occamy/occamy.c
- create mode 100644 board/pulp-platform/occamy/occamy_spl.c
- create mode 100644 configs/pulp-platform_occamy_defconfig
- create mode 100644 include/configs/pulp-platform_occamy.h
-
 diff --git a/arch/riscv/Kconfig b/arch/riscv/Kconfig
 index b3d7fd84ce..d193ea497d 100644
 --- a/arch/riscv/Kconfig
@@ -67,10 +41,10 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..7f6e322f9b
+index 0000000000..0422f1adbe
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
-@@ -0,0 +1,131 @@
+@@ -0,0 +1,86 @@
 +/dts-v1/;
 +/ {
 +  #address-cells = <2>;
@@ -80,12 +54,23 @@ index 0000000000..7f6e322f9b
 +  config {
 +    u-boot,spl-payload-offset = <0x6000000>;
 +  };
++  reserved-memory {
++   #address-cells = <2>;
++   #size-cells = <2>;
++   ranges;
++    opensbi:    sbi@80000000 {
++	      reg = <0x0 0x80000000 0x0 0x40000>;
++    };
++    snitch_mem: buffer@c0000000 {
++        reg = <0x0 0xc0000000 0x0 0x10000000>;
++    };
++  };
 +  chosen {
-+    stdout-path = "/soc/serial@40000000:115200";
++    stdout-path = "/soc/serial@2002000:115200";
 +  };
 +  memory@80000000 {
 +    device_type = "memory";
-+    reg = <0x0 0x80000000 0x0 0x40000000>;
++    reg = <0x0 0x80000000 0 0x30000000>;
 +  };
 +  cpus {
 +    #address-cells = <1>;
@@ -119,69 +104,13 @@ index 0000000000..7f6e322f9b
 +      reg = <0x0 0x0 0x0 0x1000>;
 +    };
 +    serial@2002000 {
-+      compatible = "lowrisc,uart0";
++      #address-cells = <2>;
++      #size-cells = <2>;
++      compatible = "ns16550";
 +      reg = <0x0 0x2002000 0x0 0x1000>;
 +      clock-frequency = <50000000>;
 +      current-speed = <115200>;
-+    };
-+    axi_uart0: serial@40000000 {
-+      clock-frequency = <50000000>;
-+      compatible = "xlnx,axi-uart16550-1.01.a", "xlnx,xps-uart16550-2.00.a", "ns16550";
-+      current-speed = <115200>;
-+      interrupt-parent = <&PLIC0>;
-+      interrupts = <1>;
-+      reg = <0x0 0x40000000 0x0 0x10000>;
-+      reg-offset = <0>;
 +      reg-shift = <2>;
-+      xlnx,is-a-16550 = <0x1>;
-+      xlnx,use-modem-ports = <0x0>;
-+      xlnx,use-user-ports = <0x0>;
-+    };
-+    spiclk: virt_100mhz {
-+      #clock-cells = <0>;
-+      compatible = "fixed-clock";
-+      clock-frequency = <100000000>;
-+    };
-+    axi_quad_spi_1: spi@4c000000 {
-+      compatible = "xlnx,axi-quad-spi-3.2", "xlnx,xps-spi-2.00.a";
-+      interrupt-parent = <&PLIC0>;
-+      interrupts = <2>;
-+      clocks = <&spiclk>;
-+      reg = <0x0 0x4c000000 0x0 0x10000>;
-+      xlnx,num-ss-bits = <1>;
-+      xlnx,num-transfer-bits = <0x8>;
-+      fifo-size = <16>;
-+      #address-cells = <1>;
-+      #size-cells = <0>;
-+      nor@0 {
-+        #address-cells = <0x1>;
-+        #size-cells = <0x1>;
-+        compatible = "micron,m25p80";
-+        reg = <0x0 0x0>;
-+        spi-max-frequency = <25000000>;
-+        spi-rx-bus-width = <0x4>;
-+        spi-tx-bus-width = <0x4>;
-+        m25p,fast-read;
-+        partition@0 {
-+          label = "bitstream";
-+          reg = <0x0 0x6000000>; // 96 MB
-+          read-only;
-+        };
-+        partition@6000000 {
-+          label = "u-boot";
-+          reg = <0x6000000 0x100000>; // 1 MB
-+          read-only;
-+        };
-+        uimage@6100000 {
-+          label = "uimage";
-+          reg = <0x6100000 0x1000000>; // 16 MB
-+          read-only;
-+        };
-+        partition@7100000 {
-+          label = "filesystem";
-+          reg = <0x7100000 0x8f00000>; // 143 MB
-+        };
-+      };
 +    };
 +    clint@4000000 {
 +      clock-frequency = <50000000>;
@@ -263,7 +192,7 @@ index 0000000000..d703634b1a
 +int ft_board_setup(void *fdt, struct bd_info *bd) { return 0; }
 diff --git a/board/pulp-platform/occamy/occamy_spl.c b/board/pulp-platform/occamy/occamy_spl.c
 new file mode 100644
-index 0000000000..bc48d4d1da
+index 0000000000..53a47765c4
 --- /dev/null
 +++ b/board/pulp-platform/occamy/occamy_spl.c
 @@ -0,0 +1,23 @@
@@ -280,7 +209,7 @@ index 0000000000..bc48d4d1da
 +
 +u32 spl_boot_device(void)
 +{
-+	return BOOT_DEVICE_SPI;
++	return BOOT_DEVICE_RAM;
 +}
 +
 +#ifdef CONFIG_SPL_LOAD_FIT
@@ -312,9 +241,9 @@ index 0000000000..3cdb710ef7
 +CONFIG_OF_BOARD_SETUP=y
 +CONFIG_BOOTDELAY=1
 +CONFIG_USE_BOOTCOMMAND=y
-+CONFIG_BOOTCOMMAND="dhcp; tftp 0x83000000 129.132.24.199:vcu128-01/Image.itb; bootm 0x83000000"
++CONFIG_BOOTCOMMAND=""
 +CONFIG_USE_BOOTARGS=y
-+CONFIG_BOOTARGS="earlyprintk"
++CONFIG_BOOTARGS="earlyprintk earlycon console=uart,mmio32,0x2002000 earlycon=uart,mmio32,0x2002000"
 +CONFIG_LOG=y
 +CONFIG_LOG_MAX_LEVEL=9
 +CONFIG_LOGF_FUNC=y
@@ -369,7 +298,7 @@ index 0000000000..3cdb710ef7
 +CONFIG_PHY=y
 +CONFIG_SYS_NS16550=y
 +CONFIG_SPI=y
-+CONFIG_XILINX_SPI=y
++CONFIG_SYS_MEM_TOP_HIDE=0x00200000
 +CONFIG_CLINT_TIMER=y
 \ No newline at end of file
 diff --git a/include/configs/pulp-platform_occamy.h b/include/configs/pulp-platform_occamy.h
@@ -387,9 +316,9 @@ index 0000000000..ed20ca4709
 +
 +// fdt_high=~0UL to use FDT in-place
 +#define CONFIG_EXTRA_ENV_SETTINGS \
-+	"fdt_high=0xe0000000\0" \
-+	"tftptimeout=1000\0" \
-+	"tftptimeoutcountmax=1000\0"
++	"fdt_high=0xb0000000" \
++	"" \
++	""
 +
 +#ifdef CONFIG_SPL
 +#define CONFIG_SPL_MAX_SIZE		0x00020000
@@ -417,6 +346,3 @@ index 0000000000..ed20ca4709
 +#define CONFIG_SYS_MAX_FLASH_BANKS 1
 +#define CONFIG_SYS_FLASH_BASE 0x0
 +#endif
--- 
-2.16.5
-
