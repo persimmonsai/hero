@@ -1,4 +1,4 @@
-From 3d8aab6624d1681a8a8e64119cea3c0182eb85af Mon Sep 17 00:00:00 2001
+From 61a8852531d5227ad28791d4f640dcdcf5db8766 Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -8,7 +8,7 @@ Subject: [PATCH] Patch
  arch/riscv/Kconfig                      |   4 +
  arch/riscv/dts/Makefile                 |   1 +
  arch/riscv/dts/occamy-u-boot.dtsi       |   1 +
- arch/riscv/dts/occamy.dts               | 149 ++++++++++++++++++++
+ arch/riscv/dts/occamy.dts               | 152 +++++++++++++++++++++
  arch/riscv/lib/fdt_fixup.c              |   4 +-
  board/pulp-platform/occamy/Kconfig      |  31 +++++
  board/pulp-platform/occamy/Makefile     |   5 +
@@ -34,7 +34,7 @@ Subject: [PATCH] Patch
  lib/fdtdec.c                            | 174 +++++++++++++-----------
  lib/time.c                              |   4 +-
  lib/tiny-printf.c                       |   6 +-
- 30 files changed, 651 insertions(+), 144 deletions(-)
+ 30 files changed, 654 insertions(+), 144 deletions(-)
  create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
  create mode 100644 arch/riscv/dts/occamy.dts
  create mode 100644 board/pulp-platform/occamy/Kconfig
@@ -100,10 +100,10 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..aca6cddbbc
+index 0000000000..82bd3652c3
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,152 @@
 +// Copyright 2021 ETH Zurich and University of Bologna.
 +// Licensed under the Apache License, Version 2.0, see LICENSE for details.
 +// SPDX-License-Identifier: Apache-2.0
@@ -124,13 +124,16 @@ index 0000000000..aca6cddbbc
 +  };
 +  memory@80000000 {
 +    device_type = "memory";
-+    reg = <0x0 0x80000000 0x0 0x20000000>;
++    reg = <0x0 0x80000000 0x0 0x30000000>;
 +  };
-+  // Create a reserved memory region for Snitch program memory
++  // Create a reserved memory regio for Snitch program memory
 +  reserved-memory {
 +    #address-cells = <2>;
 +    #size-cells = <2>;
 +    ranges;
++    opensbi:    sbi@80000000 {
++ 	      reg = <0x0 0x80000000 0x0 0x40000>;
++    };
 +    snitch_mem: buffer@c0000000 {
 +        reg = <0x0 0xc0000000 0x0 0x10000000>;
 +    };
@@ -138,12 +141,12 @@ index 0000000000..aca6cddbbc
 +  cpus {
 +    #address-cells = <1>;
 +    #size-cells = <0>;
-+    timebase-frequency = <12500000>;
++    timebase-frequency = <10000000>;
 +    CPU0: cpu@0 {
 +      device_type = "cpu";
 +      status = "okay";
 +      compatible = "eth,ariane", "riscv";
-+      clock-frequency = <25000000>;
++      clock-frequency = <50000000>;
 +      riscv,isa = "rv64fimafd";
 +      mmu-type = "riscv,sv39";
 +      tlb-split;
@@ -197,7 +200,7 @@ index 0000000000..aca6cddbbc
 +      reg-names = "control";
 +    };
 +    clint0: clint@4000000 {
-+      clock-frequency = <12500000>;
++      clock-frequency = <10000000>;
 +      compatible = "riscv,clint0";
 +      // clint generates software and timer interrupts to the core. Attach them
 +      // to the CPU
@@ -1144,7 +1147,7 @@ index fe0562cd6f..f74f045e87 100644
  	}
 diff --git a/include/configs/pulp-platform_occamy.h b/include/configs/pulp-platform_occamy.h
 new file mode 100644
-index 0000000000..d4ddc3d2c5
+index 0000000000..291f584952
 --- /dev/null
 +++ b/include/configs/pulp-platform_occamy.h
 @@ -0,0 +1,39 @@
@@ -1157,9 +1160,9 @@ index 0000000000..d4ddc3d2c5
 +
 +// fdt_high=~0UL to use FDT in-place
 +#define CONFIG_EXTRA_ENV_SETTINGS \
-+	"fdt_high=0xe0000000\0" \
-+	"tftptimeout=1000\0" \
-+	"tftptimeoutcountmax=1000\0"
++	"fdt_high=0xb0000000\0" \
++	"" \
++	""
 +
 +#ifdef CONFIG_SPL
 +#define CONFIG_SPL_MAX_SIZE		0x00020000
