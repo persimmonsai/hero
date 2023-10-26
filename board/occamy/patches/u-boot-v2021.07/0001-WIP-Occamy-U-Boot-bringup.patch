@@ -1,4 +1,4 @@
-From 61a8852531d5227ad28791d4f640dcdcf5db8766 Mon Sep 17 00:00:00 2001
+From 018449f12eaf12ccb4f023a5b24977c1ec37e7cf Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -16,7 +16,7 @@ Subject: [PATCH] Patch
  board/pulp-platform/occamy/occamy_spl.c |  46 +++++++
  common/board_f.c                        |  71 +++++-----
  common/bootm.c                          |   3 +-
- common/console.c                        |  83 +++++++++++
+ common/console.c                        |  90 ++++++++++++
  common/image.c                          |   5 +-
  common/init/board_init.c                |   8 ++
  common/spl/spl.c                        |   6 +-
@@ -34,7 +34,7 @@ Subject: [PATCH] Patch
  lib/fdtdec.c                            | 174 +++++++++++++-----------
  lib/time.c                              |   4 +-
  lib/tiny-printf.c                       |   6 +-
- 30 files changed, 654 insertions(+), 144 deletions(-)
+ 30 files changed, 661 insertions(+), 144 deletions(-)
  create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
  create mode 100644 arch/riscv/dts/occamy.dts
  create mode 100644 board/pulp-platform/occamy/Kconfig
@@ -100,7 +100,7 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..82bd3652c3
+index 0000000000..83d6db257e
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
 @@ -0,0 +1,152 @@
@@ -109,7 +109,7 @@ index 0000000000..82bd3652c3
 +// SPDX-License-Identifier: Apache-2.0
 +
 +
-+// TODO(niwis) ato generate
++// TODO(niwis) auto generate
 +/dts-v1/;
 +/ {
 +  #address-cells = <2>;
@@ -686,7 +686,7 @@ index ea71522d0c..8955132af7 100644
  		return NULL;
  	}
 diff --git a/common/console.c b/common/console.c
-index 561cdf36a7..f4c724491c 100644
+index 561cdf36a7..ed710f256e 100644
 --- a/common/console.c
 +++ b/common/console.c
 @@ -24,6 +24,79 @@
@@ -769,21 +769,32 @@ index 561cdf36a7..f4c724491c 100644
  static int on_console(const char *name, const char *value, enum env_op op,
  	int flags)
  {
-@@ -466,6 +539,13 @@ int serial_printf(const char *fmt, ...)
+@@ -479,10 +552,24 @@ int fgetc(int file)
+ 				 */
+ 				if (console_has_tstc())
+ 					return console_getc(file);
++				else {
++					int occamy_c;
++					occamy_c = _occamy_fgetc();
++					if (occamy_c) {
++						return occamy_c;
++					}
++				}
+ 				console_tstc(file);
+ 			} else {
+ 				if (console_tstc(file))
+ 					return console_getc(file);
++				else {
++					int occamy_c;
++					occamy_c = _occamy_fgetc();
++					if (occamy_c) {
++						return occamy_c;
++					}
++				}
+ 			}
  
- int fgetc(int file)
- {
-+	int occamy_c;
-+	do {
-+		occamy_c = _occamy_fgetc();
-+	} while (occamy_c == 0);
-+	
-+	return occamy_c;
-+
- 	if (file < MAX_FILES) {
- 		/*
- 		 * Effectively poll for input wherever it may be available.
-@@ -640,6 +720,7 @@ static inline void print_pre_console_buffer(int flushpoint) {}
+ 			/*
+@@ -640,6 +727,7 @@ static inline void print_pre_console_buffer(int flushpoint) {}
  
  void putc(const char c)
  {
@@ -791,7 +802,7 @@ index 561cdf36a7..f4c724491c 100644
  	if (!gd)
  		return;
  
-@@ -681,6 +762,8 @@ void putc(const char c)
+@@ -681,6 +769,8 @@ void putc(const char c)
  
  void puts(const char *s)
  {
