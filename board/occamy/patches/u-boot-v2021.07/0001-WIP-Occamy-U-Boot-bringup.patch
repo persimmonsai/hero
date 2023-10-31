@@ -1,4 +1,4 @@
-From 26b6a09c875af61bce952e90a9d1d7e290d6ab0a Mon Sep 17 00:00:00 2001
+From 45e595b7315e737bffc0e3fa159176b0603bf258 Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -100,7 +100,7 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..4827951b75
+index 0000000000..5000b7bbd3
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
 @@ -0,0 +1,152 @@
@@ -243,8 +243,8 @@ index 0000000000..4827951b75
 +      // points to a memory region reserved for use by the cluster
 +      memory-region = <&snitch_mem>;
 +      // cluster specific properties
-+      eth,compute-cores = <8>;
-+      eth,dm-cores = <1>;
++      eth,compute-cores = <1>;
++      eth,dm-cores = <0>;
 +      eth,quadrant-idx = <0>;
 +      eth,cluster-idx = <0>; // Used to calculate offsets in clint, soc-ctrl etc..
 +      // A handle to the soc-control register where isolates etc are located
