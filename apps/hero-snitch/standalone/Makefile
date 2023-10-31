@@ -13,6 +13,15 @@ deploy: snitch-app/hello_world.bin cva6-app/bringup
 	mkdir -p deploy_standalone
 	cp run.sh cva6-app/bringup cva6-app/file_to_offload.txt snitch-app/build/hello_world.bin deploy_standalone
 	rsync -r deploy_standalone root@hero-vcu128-02.ee.ethz.ch:/root/
+
+zip: snitch.zip
+
+snitch.zip: snitch-app/hello_world.bin cva6-app/bringup
+	mkdir -p deploy_standalone
+	cp run.sh cva6-app/bringup cva6-app/file_to_offload.txt snitch-app/build/hello_world.bin deploy_standalone
+
+	zip -r deploy_standalone/snitch.zip deploy_standalone/run.sh deploy_standalone/bringup deploy_standalone/file_to_offload.txt deploy_standalone/hello_world.bin
+
 clean:
 	make -C cva6-app clean
 	rm -rf snitch-app/build deploy_standalone

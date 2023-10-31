@@ -63,26 +63,6 @@ add_definitions(-DSNITCH_HERO)
 # LIBRARIES
 ################################################################################
 
-include_directories(
-  ${SNITCH_SOFTWARE_DIR}/applications/include
-  ${SNITCH_SOFTWARE_DIR}/applications/data
-  ${SNITCH_SOFTWARE_DIR}/applications/src/layers
-  ${SNITCH_SOFTWARE_DIR}/applications/src/kernels
-  ${SNITCH_SOFTWARE_DIR}/applications/src/utils )
-add_library(kernels
-  ${SNITCH_SOFTWARE_DIR}/applications/src/kernels/batchnorm.c
-  ${SNITCH_SOFTWARE_DIR}/applications/src/kernels/maxpool.c
-  ${SNITCH_SOFTWARE_DIR}/applications/src/kernels/gemm.c )
-add_library(layers
-  ${SNITCH_SOFTWARE_DIR}/applications/src/layers/batchnorm_layer.c
-  ${SNITCH_SOFTWARE_DIR}/applications/src/layers/maxpool_layer.c
-  ${SNITCH_SOFTWARE_DIR}/applications/src/layers/conv2d_layer.c )
-add_library(utils
-  ${SNITCH_SOFTWARE_DIR}/applications/src/utils/utils.c )
-target_link_libraries(kernels ${SNITCH_RUNTIME})
-target_link_libraries(layers ${SNITCH_RUNTIME} kernels utils)
-target_link_libraries(utils ${SNITCH_RUNTIME})
-
 ################################################################################
 # Applications
 ################################################################################
