@@ -1,4 +1,4 @@
-From e2f9b205868e078ad2f8d2be01bac4c4107c6854 Mon Sep 17 00:00:00 2001
+From 26b6a09c875af61bce952e90a9d1d7e290d6ab0a Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -100,7 +100,7 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..83d6db257e
+index 0000000000..4827951b75
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
 @@ -0,0 +1,152 @@
@@ -124,7 +124,7 @@ index 0000000000..83d6db257e
 +  };
 +  memory@80000000 {
 +    device_type = "memory";
-+    reg = <0x0 0x80000000 0x0 0x30000000>;
++    reg = <0x0 0x80000000 0x0 0x80000000>;
 +  };
 +  // Create a reserved memory regio for Snitch program memory
 +  reserved-memory {
@@ -200,7 +200,7 @@ index 0000000000..83d6db257e
 +      reg-names = "control";
 +    };
 +    clint0: clint@4000000 {
-+      clock-frequency = <10000000>;
++      clock-frequency = <12500000>;
 +      compatible = "riscv,clint0";
 +      // clint generates software and timer interrupts to the core. Attach them
 +      // to the CPU
