@@ -55,6 +55,8 @@ br-hrv-occamy-defconfig: check_environment
 br-hrv-occamy-base: br-hrv-occamy-defconfig
 	chmod -R u+w $(HERO_INSTALL)
 	mkdir -p $(CURDIR)/output/br-hrv-occamy
+	mkdir -p $(CURDIR)/buildroot/boot/opensbi/1.0
+	cp $(CURDIR)/board/occamy/patches/opensbi-1.0/0001-Remove-PMP-on-Clint.patch $(CURDIR)/buildroot/boot/opensbi/1.0/
 	$(MAKE) O=$(CURDIR)/output/br-hrv-occamy BR2_EXTERNAL=$(ROOT) -C $(ROOT)/buildroot hrv_occamy_defconfig
 	if [ -f $(CURDIR)/local.cfg ]; then cat $(CURDIR)/local.cfg >> $(CURDIR)/output/br-hrv-occamy/.config; fi
 	$(MAKE) -C $(CURDIR)/output/br-hrv-occamy
