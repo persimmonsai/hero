@@ -1,4 +1,4 @@
-From 45e595b7315e737bffc0e3fa159176b0603bf258 Mon Sep 17 00:00:00 2001
+From 13df833c602e7b5378fb3c61824c68698dfe9447 Mon Sep 17 00:00:00 2001
 From: Roman Pustobaiev <roman@persimmons.ai>
 Date: Thu, 12 Oct 2023 14:36:32 +0200
 Subject: [PATCH] Patch
@@ -8,7 +8,7 @@ Subject: [PATCH] Patch
  arch/riscv/Kconfig                      |   4 +
  arch/riscv/dts/Makefile                 |   1 +
  arch/riscv/dts/occamy-u-boot.dtsi       |   1 +
- arch/riscv/dts/occamy.dts               | 152 +++++++++++++++++++++
+ arch/riscv/dts/occamy.dts               | 155 +++++++++++++++++++++
  arch/riscv/lib/fdt_fixup.c              |   4 +-
  board/pulp-platform/occamy/Kconfig      |  31 +++++
  board/pulp-platform/occamy/Makefile     |   5 +
@@ -34,7 +34,7 @@ Subject: [PATCH] Patch
  lib/fdtdec.c                            | 174 +++++++++++++-----------
  lib/time.c                              |   4 +-
  lib/tiny-printf.c                       |   6 +-
- 30 files changed, 661 insertions(+), 144 deletions(-)
+ 30 files changed, 664 insertions(+), 144 deletions(-)
  create mode 100644 arch/riscv/dts/occamy-u-boot.dtsi
  create mode 100644 arch/riscv/dts/occamy.dts
  create mode 100644 board/pulp-platform/occamy/Kconfig
@@ -100,10 +100,10 @@ index 0000000000..aa7cdbfb18
 +#include "binman.dtsi"
 diff --git a/arch/riscv/dts/occamy.dts b/arch/riscv/dts/occamy.dts
 new file mode 100644
-index 0000000000..5000b7bbd3
+index 0000000000..13e8d4bb74
 --- /dev/null
 +++ b/arch/riscv/dts/occamy.dts
-@@ -0,0 +1,152 @@
+@@ -0,0 +1,155 @@
 +// Copyright 2021 ETH Zurich and University of Bologna.
 +// Licensed under the Apache License, Version 2.0, see LICENSE for details.
 +// SPDX-License-Identifier: Apache-2.0
@@ -136,6 +136,9 @@ index 0000000000..5000b7bbd3
 +    };
 +    snitch_mem: buffer@c0000000 {
 +        reg = <0x0 0xc0000000 0x0 0x10000000>;
++    };
++    io_mem: buffer@d0000000 {
++        reg = <0x0 0xd0000000 0x0 0x10000000>;
 +    };
 +  };
 +  cpus {
