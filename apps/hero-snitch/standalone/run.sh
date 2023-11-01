@@ -9,6 +9,6 @@ insmod /lib/modules/5.16.9/extra/snitch.ko
 cat /proc/iomem
 cat /sys/kernel/debug/kernel_page_tables
 
-./bringup hello_world.bin | tee -a run.log
+./bringup hello_world.bin file_to_offload.txt | tee -a run.log
 
 rmmod snitch.ko
