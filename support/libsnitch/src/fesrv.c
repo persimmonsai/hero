@@ -45,7 +45,7 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]);
  * @param a2h_rb_p physical address of a2h ring buffer is stored here to be passed to the
  * accelerator
  */
-void fesrv_init(fesrv_t *fs, snitch_dev_t *dev, void **a2h_rb_p) {
+void fesrv_init(fesrv_t *fs, snitch_dev_t *dev, void **a2h_rb_p, uint32_t a2hrb_elements) {
   void *addr;
 
   fs->dev = dev;
@@ -60,7 +60,6 @@ void fesrv_init(fesrv_t *fs, snitch_dev_t *dev, void **a2h_rb_p) {
   // allocate an acceleartor to host ring buffer where each element is 6*sizeof(uint64_t) to support
   // syscalls to fesrv
   const unsigned a2hrb_element_size = sizeof(uint64_t) * 6;
-  const unsigned a2hrb_elements = 16;
   fs->a2h_rb = (struct ring_buf *)snitch_l3_malloc(fs->dev, sizeof(struct ring_buf), a2h_rb_p);
   assert(fs->a2h_rb);
   fs->a2h_rb->data_v =

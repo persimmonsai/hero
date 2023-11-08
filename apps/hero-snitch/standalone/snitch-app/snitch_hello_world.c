@@ -84,7 +84,7 @@ int main(void) {
   snrt_cluster_hw_barrier();
 
   /* Print file */
-  if (core_idx == 2) {
+  if (!snrt_is_dm_core()) {
     snrt_mutex_lock(&print_lock);
     printf("(cluster %u, idx %u/%u, is_dma = %i) Printing data from L2:\n %s\n", cluster_idx, core_idx, core_num - 1,
            snrt_is_dm_core(), file_content);

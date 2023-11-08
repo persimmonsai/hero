@@ -366,7 +366,7 @@ int snitch_load_bin(snitch_dev_t *dev, const char *name) {
   snitch_scratch_reg_write(dev, 0, (uint64_t)dev->l3.p_addr);
 
   // Program boot-rom and set pointer to it in scratch1
-  boot_data_off = ALIGN_UP(size, 0x100);
+  boot_data_off = ALIGN_UP(size, 0x1000) + 0x1000;
   pr_trace("copy bootrom data to L3 and setting pointer in scratch1\n");
   snitch_scratch_reg_write(dev, 1, (uint64_t)dev->l3.p_addr + boot_data_off);
   bd = malloc(sizeof(*bd));

@@ -275,7 +275,7 @@ int hero_dev_init(HeroDev *dev) {
   // data in L3 to prevent overwriting thereof
   void *a2h_rb_addr;
   gd.fs = malloc(sizeof(fesrv_t));
-  fesrv_init(gd.fs, snitch, &a2h_rb_addr);
+  fesrv_init(gd.fs, snitch, &a2h_rb_addr, 16);
   snitch->l3l->a2h_rb = (uint32_t)(uintptr_t)a2h_rb_addr;
 
   // start front end server

@@ -25,5 +25,5 @@ typedef struct {
   snitch_dev_t *dev;
 } fesrv_t;
 
-void fesrv_init(fesrv_t *fs, snitch_dev_t *dev, void **a2h_rb_p);
+void fesrv_init(fesrv_t *fs, snitch_dev_t *dev, void **a2h_rb_p, uint32_t a2hrb_elements);
 void fesrv_run(fesrv_t *fs);

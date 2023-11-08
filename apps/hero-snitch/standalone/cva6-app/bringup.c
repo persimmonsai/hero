@@ -126,7 +126,7 @@ int main(int argc, char *argv[]) {
 
   // Add TLB entry for required ranges
   // reset_tlbs(snitch);
-  set_direct_tlb_map(snitch, 0, 0x01000000, 0x0101ffff);  // BOOTROM
+  set_direct_tlb_map(snitch, 0, 0x20000,    0x40000);  // BOOTROM
   set_direct_tlb_map(snitch, 1, 0x02000000, 0x02000fff);  // SoC Control
   set_direct_tlb_map(snitch, 2, 0x04000000, 0x040fffff);  // CLINT
   set_direct_tlb_map(snitch, 3, 0x10000000, 0x105fffff);  // Quadrants
@@ -160,7 +160,7 @@ int main(int argc, char *argv[]) {
   // setup front-end server. Do this here so that the host communication data is before any other
   // data in L3 to prevent overwriting thereof
   fesrv_t *fs = malloc(sizeof(fesrv_t));
-  fesrv_init(fs, snitch, &a2h_rb_addr);
+  fesrv_init(fs, snitch, &a2h_rb_addr, 1024);
   snitch->l3l->a2h_rb = (uint32_t)(uintptr_t)a2h_rb_addr;
 
   // fill memory with known pattern
@@ -220,8 +220,8 @@ int main(int argc, char *argv[]) {
     snitch_mbox_write(snitch, 102);
 
     printf("Set interrupt on core %u\n", wake_up_core);
-    snitch_ipi_set(snitch, 0, 1 << (wake_up_core + cluster_idx * 9 + 1));
-    // snitch_ipi_set(snitch, 0, 0x3FE);
+    //snitch_ipi_set(snitch, 0, 1 << (wake_up_core + cluster_idx * 9 + 1));
+    snitch_ipi_set(snitch, 0, 0x3FE);
     fflush(stdout);
 
     printf("Waiting for program to terminate..\n");
