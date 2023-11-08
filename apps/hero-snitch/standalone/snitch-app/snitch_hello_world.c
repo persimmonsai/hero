@@ -16,7 +16,7 @@ static volatile uint32_t *soc_scratch = soc_scratch0;
 extern volatile struct ring_buf *g_a2h_rb;
 extern volatile struct ring_buf *g_a2h_mbox;
 extern volatile struct ring_buf *g_h2a_mbox;
-static volatile int32_t print_lock;
+static volatile int32_t print_lock = 0;
 static volatile uint8_t *l3;
 
 #define FILE_SIZE 128
@@ -30,6 +30,7 @@ int main(void) {
   struct l3_layout l3l;
   int ret;
   volatile struct ring_buf priv_rb;
+  print_lock = 1;
 
   unsigned cluster_idx = snrt_cluster_idx();
   unsigned core_idx = snrt_global_core_idx();
@@ -46,11 +47,9 @@ int main(void) {
     // Setup shared heap (in L3)
     l3 = (uint8_t *)l3l.heap;
     // Setup print lock
-    print_lock = 0;
 
-    snrt_mutex_lock(&print_lock);
     printf("(cluster %u, idx %u/%u, is_dma = %i) Finished setting up mailboxes\n", cluster_idx,
-           core_idx, core_num - 1, snrt_is_dm_core());
+            core_idx, core_num - 1, snrt_is_dm_core());
     snrt_mutex_release(&print_lock);
   }
 
@@ -73,8 +72,10 @@ int main(void) {
            core_num - 1, snrt_is_dm_core());
     for (unsigned int i = 0; i < FILE_SIZE; i++) {
       file_content[i] = l3[i];
-      if (i % 16 == 0) printf("\n%#x -> %#x -- ", &l3[i], &file_content[i]);
-      printf("%x ", file_content[i]);
+      if (i % 16 == 0) {
+        printf("\n%#x -> %#x -- ", &l3[i], &file_content[i]);
+      }
+      printf("%x", file_content[i]);
     }
     printf("\n");
     snrt_mutex_release(&print_lock);
