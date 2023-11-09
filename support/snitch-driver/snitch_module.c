@@ -83,6 +83,7 @@ struct sn_cluster {
   void __iomem *pbase;
   struct shared_mem l1;
   struct shared_mem l3;
+  struct shared_mem dma;
   struct sn_cluster_info sci;
   struct list_head list;
   int minor;
@@ -116,6 +117,8 @@ static void set_isolation(struct sn_cluster *sc, int iso);
 static int isolate(struct sn_cluster *sc);
 static int deisolate(struct sn_cluster *sc);
 static uint32_t get_isolation(uint32_t quadrant);
+static void gpio_reg_write(uint32_t reg_off, uint32_t val);
+static uint32_t gpio_reg_read(uint32_t reg_off);
 static void soc_reg_write(uint32_t reg_off, uint32_t val);
 static uint32_t soc_reg_read(uint32_t reg_off);
 static void quadrant_ctrl_reg_write(struct quadrant_ctrl *qc, uint32_t reg_off, uint32_t val);
@@ -172,6 +175,7 @@ spinlock_t soc_lock;
 void __iomem *soc_regs;
 void __iomem *clint_regs;
 void __iomem *clint_regs_p;
+void __iomem *gpio_regs;
 
 // ----------------------------------------------------------------------------
 //
@@ -287,6 +291,24 @@ static long snitch_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 
     return retval;
   }
+  case SNIOS_GPIO_W: {
+    info("(CMD SNIOS_GPIO_W)\n");
+    if (copy_from_user(&sreg, p, sizeof(sreg)))
+      return -EFAULT;
+    sreg.off = 5;
+    info("gpio write reg %d val %#x\n", sreg.off, sreg.val);
+    gpio_reg_write(sreg.off, sreg.val);
+    return 0;
+  }
+  case SNIOS_GPIO_R: {
+    info("(CMD SNIOS_GPIO_R)\n");
+    sreg.off = 4;
+    sreg.val = gpio_reg_read(sreg.off);
+    info("scratch read reg %d val %#x\n", sreg.off, sreg.val);
+    if (copy_to_user(p, &sreg, sizeof(sreg)))
+      return -EFAULT;
+    return 0;
+  }
   case SNIOS_SCRATCH_W: {
     info("(CMD SNIOS_SCRATCH_W)\n");
     if (copy_from_user(&sreg, p, sizeof(sreg)))
@@ -397,6 +419,11 @@ int snitch_mmap(struct file *file, struct vm_area_struct *vma) {
     strncpy(type, "l1", sizeof(type));
     mapoffset = sc->l1.pbase;
     psize = sc->l1.size;
+    break;
+  case 2:
+    strncpy(type, "dma", sizeof(type));
+    mapoffset = sc->dma.pbase;
+    psize = sc->dma.size;
     break;
   default:
     return -EINVAL;
@@ -541,6 +568,16 @@ static uint32_t get_isolation(uint32_t quadrant) {
   return quadrant_ctrl_reg_read(qc, QCTL_ISOLATED_REG_OFFSET / 4) & 0xf;
 }
 
+static void gpio_reg_write(uint32_t reg_off, uint32_t val) {
+  u32 rb;
+  iowrite32(val, (uint32_t *)gpio_regs + reg_off);
+  rb = ioread32((uint32_t *)gpio_regs + reg_off);
+  info("gpio_reg_write reg %d value %08x rb: %08x (va=%px)\n", reg_off, val, rb, (uint32_t *)gpio_regs + reg_off);
+}
+static uint32_t gpio_reg_read(uint32_t reg_off) {
+  return ioread32((uint32_t *)gpio_regs + reg_off);
+}
+
 static void soc_reg_write(uint32_t reg_off, uint32_t val) {
   u32 rb;
   spin_lock(&soc_lock);
@@ -655,7 +692,7 @@ static int read_tlb(struct sn_cluster *sc, struct axi_tlb_entry *tlbe) {
     reg_off = (QCTL_TLB_WIDE_REG_OFFSET   + tlbe->idx * (TLB_ENTRY_BYTES+4)) / 4;
   } else
     return -EINVAL;
-  
+
 
   info("Reading at %px -> %px (off %x, %x)\n", (uint32_t *) sc->quadrant_ctrl->regs + reg_off + 0 , (uint32_t *) sc->quadrant_ctrl->regs + reg_off + 6, QCTL_TLB_NARROW_REG_OFFSET, reg_off);
   page_num_first_low  = ioread32((uint32_t *) sc->quadrant_ctrl->regs + reg_off + 0 );
@@ -690,12 +727,17 @@ static int test_read_regions(struct sn_cluster *sc, uint32_t reg_off) {
   info("CLUSTER L3 : Attempting to read at %px + %x\n", (void *)sc->l3.vbase, reg_off);
   val = ioread32((void *)sc->l3.vbase + reg_off);
 
+  info("CLUSTER DMA : Attempting to read at %px + %x\n", (void *)sc->dma.vbase, reg_off);
+  val = ioread32((void *)sc->dma.vbase + reg_off);
+
   //info("QUAD CTL : Attempting to read at %px + %x\n", qc->regs, reg_off);
   //val = ioread32((uint32_t *)qc->regs + reg_off);
 
   info("CLINT : Attempting to read at %px + %x\n", (uint32_t *) clint_regs, reg_off);
   val = ioread32((uint32_t *)clint_regs + reg_off);
 
+  info("GPIO : Attempting to read at %px + %x\n", (uint32_t *) gpio_regs, reg_off);
+  val = ioread32((uint32_t *)gpio_regs + reg_off);
 
   return 0;
 }
@@ -731,12 +773,14 @@ static u32 of_get_prop_u32_default(const struct device_node *np, const char *pro
  */
 static int snitch_probe(struct platform_device *pdev) {
   struct resource *res, memres;
+  struct resource coherentres;
   struct sn_cluster *sc;
   struct quadrant_ctrl *qc;
   struct device_node *np;
   struct resource socres;
   struct resource clintres;
   struct resource quadctrlres;
+  struct resource gpiores;
   int ret;
   int err = 0;
 
@@ -787,6 +831,28 @@ static int snitch_probe(struct platform_device *pdev) {
   sc->sci.periph_size = resource_size(res);
   dev_info(&pdev->dev, "Remapped cluster's PERIPHERALS\n");
   info("PERIPHERALS : phys=%px virt=%px size=%px\n", (void *)res->start, (void *)sc->pbase, resource_size(res));
+
+  // Gpio control
+  if (!gpio_regs) {
+    np = of_parse_phandle(pdev->dev.of_node, "eth,soc-gpio", 0);
+    if (!np) {
+      dev_err(&pdev->dev, "No %s specified\n", "eth,soc-gpio");
+      err = -EINVAL;
+      goto out;
+    }
+    ret = of_address_to_resource(np, 0, &gpiores);
+    gpio_regs = devm_ioremap_resource(&pdev->dev, &gpiores);
+    if (IS_ERR(gpio_regs)) {
+      dev_err(&pdev->dev, "could not map soc-gpio regs\n");
+      err = PTR_ERR(gpio_regs);
+      goto out;
+    }
+  }
+  dev_info(&pdev->dev, "Remapped GPIO\n");
+  info("SOC_CTL : phys=%px virt=%px size=%px\n", (void *)gpiores.start, gpio_regs, (resource_size(&gpiores)));
+
+  //Configure gpios
+  gpio_reg_write(8, 0xffffffff);
 
   // SoC control
   if (!soc_regs) {
@@ -884,11 +950,40 @@ static int snitch_probe(struct platform_device *pdev) {
   dev_info(&pdev->dev, "Remapped cluster's program MEM\n");
   info("CLUSTER L3 : phys=%px virt=%px size=%px\n", (void *)sc->l3.pbase, (void *)sc->l3.vbase, sc->l3.size);
 
+  // Get coherent reserved memory region from Device-tree
+  np = of_parse_phandle(pdev->dev.of_node, "coherent-memory-region", 0);
+  if (!np) {
+    dev_err(&pdev->dev, "No %s specified\n", "coherent-memory-region");
+    err = -EINVAL;
+    goto out;
+  }
+
+  // map coherent it to kernel space
+  ret = of_address_to_resource(np, 0, &coherentres);
+  if (ret) {
+    dev_err(&pdev->dev, "No memory address assigned to the region\n");
+    err = -EINVAL;
+    goto out;
+  }
+
+  sc->dma.pbase = coherentres.start;
+  sc->dma.size = resource_size(&coherentres);
+  sc->dma.vbase = memremap(coherentres.start, resource_size(&coherentres), MEMREMAP_WB);
+  if (!sc->dma.vbase) {
+    dev_err(&pdev->dev, "memremap failed\n");
+    err = -ENOMEM;
+    goto out;
+  }
+  dev_info(&pdev->dev, "Remapped cluster's coherent MEM\n");
+  info("CLUSTER DMA : phys=%px virt=%px size=%px\n", (void *)sc->dma.pbase, (void *)sc->dma.vbase, sc->dma.size);
+
   sc->sci.periph_size = sc->l3.size;
   sc->sci.l1_size = sc->l1.size;
   sc->sci.l3_size = sc->l3.size;
   sc->sci.l3_paddr = (void *)sc->l3.pbase;
   sc->sci.l1_paddr = (void *)sc->l1.pbase;
+  sc->sci.dma_paddr = (void *)sc->dma.pbase;
+  sc->sci.dma_size = sc->dma.size;
   sc->sci.clint_base = (uint64_t)clint_regs_p;
 
   list_add(&sc->list, &sc_list);

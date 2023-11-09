@@ -112,6 +112,18 @@ int main(void) {
   /* Barrier before exiting */
   snrt_cluster_hw_barrier();
 
+
+  if (!snrt_is_dm_core()) {
+    uint32_t buffer[1];
+
+    if (snitch_mbox_try_read(buffer) && buffer[0] == 0xff) {
+        printf("(cluster %u, idx %u/%u, is_dma = %i) Computaion done!\n", cluster_idx, core_idx,
+           core_num - 1, snrt_is_dm_core());
+
+        syscall(SYS_calc_done, 0, 0, 0, 0, 0);
+    }
+  }
+
   // Signal exit
   syscall(SYS_exit, 0, 0, 0, 0, 0);
 

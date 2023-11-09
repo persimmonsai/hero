@@ -62,6 +62,7 @@ static void populate_boot_data(snitch_dev_t *dev, struct BootData *bd);
 // cluster (as per design these are shared resources)
 // TODO: Make not ugly
 static SnitchSubDev *g_l3 = NULL;
+static SnitchSubDev *g_dma = NULL;
 struct O1HeapInstance *g_l3_heap_mgr = NULL;
 uint64_t g_l3_data_offset = 0;
 
@@ -209,9 +210,9 @@ int snitch_mmap(snitch_dev_t *dev, char *fname) {
     pr_error("Reading snitch cluster info failed\n");
     goto close;
   }
-  pr_info("computer-cores: %d dm-cores: %d l1: %08lx %ldKiB l3: %08lx %ldKiB clint: %08lx\n",
+  pr_info("computer-cores: %d dm-cores: %d l1: %08lx %ldKiB l3: %08lx %ldKiB dma: %08lx %ldKiB clint: %08lx\n",
           dev->sci.compute_num, dev->sci.dm_num, dev->sci.l1_paddr, dev->sci.l1_size / 1024, dev->sci.l3_paddr, dev->sci.l3_size / 1024,
-          dev->sci.clint_base);
+          dev->sci.dma_paddr, dev->sci.dma_size / 1024, dev->sci.clint_base);
 
   // mmap tcdm
   dev->l1.size = dev->sci.l1_size;
@@ -238,6 +239,21 @@ int snitch_mmap(snitch_dev_t *dev, char *fname) {
     pr_debug("Shared L3 memory mapped to virtual user space at %p.\n", g_l3->v_addr);
   }
   memcpy(&dev->l3, g_l3, sizeof(*g_l3));
+
+  // Map coherent (dma) DDR space
+  if (!g_dma) {
+    g_dma = malloc(sizeof(*g_dma));
+    g_dma->size = dev->sci.dma_size;
+    g_dma->p_addr = dev->sci.dma_paddr;
+    g_dma->v_addr =
+        mmap(NULL, g_dma->size, PROT_READ | PROT_WRITE, MAP_SHARED, dev->fd, SNITCH_MMAP_DMA);
+    if (g_dma->v_addr == MAP_FAILED) {
+      pr_error("mmap() failed for Shared coherent DMA memory. %s\n", strerror(errno));
+      // return -EIO;
+    }
+    pr_debug("Coherent DMA memory mapped to virtual user space at %p.\n", g_dma->v_addr);
+  }
+  memcpy(&dev->dma, g_dma, sizeof(*g_dma));
 
   // Initialize L3 heap manager in the middle of the reserved memory range
   if (!g_l3_heap_mgr) {
@@ -476,6 +492,18 @@ int snitch_ipi_get(snitch_dev_t *dev, uint32_t reg, uint32_t *mask) {
   return ret;
 }
 
+uint32_t snitch_host_req_get (snitch_dev_t *dev) {
+  struct snios_reg sreg_gpio = {0};
+  ioctl(dev->fd, SNIOS_GPIO_R, &sreg_gpio);
+  return sreg_gpio.val;
+}
+
+uint32_t snitch_host_req_set (snitch_dev_t *dev, uint32_t val) {
+  struct snios_reg sreg_gpio = {0};
+  sreg_gpio.val = val;
+  ioctl(dev->fd, SNIOS_GPIO_W, &sreg_gpio);
+  return 0;
+}
 
 void snitch_fesrv_run(snitch_dev_t *dev) {
   pr_error("unimplemented\n");

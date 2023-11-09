@@ -44,6 +44,7 @@ typedef struct {
   SnitchSubDev l1;
   SnitchSubDev periph;
   SnitchSubDev l3;
+  SnitchSubDev dma;
   struct O1HeapInstance *l3_heap_mgr;
   // offset in l3 memory where shared data region starts and the o1heap manager is allocating
   uint64_t l3_data_offset;
@@ -284,5 +285,7 @@ void snitch_set_device_loglevel(snitch_dev_t *dev, int lvl);
 
 int snitch_test_read_regions(snitch_dev_t *dev, uint32_t reg);
 
+uint32_t snitch_host_req_get (snitch_dev_t *dev);
+uint32_t snitch_host_req_set (snitch_dev_t *dev, uint32_t val);
 
 //!@}

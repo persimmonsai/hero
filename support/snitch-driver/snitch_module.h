@@ -42,9 +42,11 @@ struct sn_cluster_info {
   uint32_t quadrant_idx;
   size_t l3_size;
   size_t l1_size;
+  size_t dma_size;
   size_t periph_size;
   void *l3_paddr;
   void *l1_paddr;
+  void *dma_paddr;
   uint64_t clint_base;
 };
 
@@ -54,6 +56,7 @@ struct sn_cluster_info {
  */
 #define SNITCH_MMAP_L3 (0 * sysconf(_SC_PAGE_SIZE))
 #define SNITCH_MMAP_TCDM (1 * sysconf(_SC_PAGE_SIZE))
+#define SNITCH_MMAP_DMA (2 * sysconf(_SC_PAGE_SIZE))
 
 /**
  * IOCTL
@@ -82,6 +85,7 @@ struct axi_tlb_entry {
  *
  */
 #define SNIOC_SET_OPTIONS _IOW(SNIOC_MAGIC, 0, char *)
+
 /**
  * @brief Write to scratch registers. Pass `struct snios_reg` containing the register offset and
  * value
@@ -143,6 +147,20 @@ struct axi_tlb_entry {
  *
  */
 #define SNIOS_TEST_READ_REGIONS _IOR(SNIOC_MAGIC, 10, struct snios_reg)
+
+/**
+ * @brief Write to soc gpio
+ * value
+ *
+ */
+#define SNIOS_GPIO_W _IOW(SNIOC_MAGIC, 11, struct snios_reg)
+
+/**
+ * @brief Read from gpio
+ * value
+ *
+ */
+#define SNIOS_GPIO_R _IOW(SNIOC_MAGIC, 12, struct snios_reg)
 
 // Values for SNIOC_SET_OPTIONS
 #define SNIOS_DEISOLATE 0x0001 /* Isolate the cluster */

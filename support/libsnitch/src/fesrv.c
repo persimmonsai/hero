@@ -31,6 +31,7 @@
 #define SYS_read 63
 #define SYS_wake 1235
 #define SYS_cycle 1236
+#define SYS_calc_done 65
 
 static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]);
 
@@ -101,6 +102,7 @@ void fesrv_run(fesrv_t *fs) {
   uint32_t prev_tail = 0;
   const char *abort_reason;
 
+
   g_interrupt = 0;
   signal(SIGINT, intHandler);
 
@@ -117,6 +119,22 @@ void fesrv_run(fesrv_t *fs) {
   tstart = time(NULL);
 
   while (!abort) {
+
+    // Read host requests
+    if (snitch_host_req_get(fs->dev)) {
+      snitch_host_req_set(fs->dev, 0x0);
+      //Copy data from host to snitch memory
+      uint32_t *host_ptr = (uint32_t *)fs->dev->dma.v_addr;
+      uint32_t *snitch_ptr = (uint32_t *)fs->dev->l3l->heap;
+
+      uint32_t length = host_ptr[0];
+
+      for (uint32_t i = 0; i < length; i++) {
+        snitch_ptr[i] = host_ptr[i];
+      }
+
+      snitch_mbox_write(fs->dev, 0xff);
+    }
 
     // try to pop a value
     // snitch_flush(fs->dev);
@@ -233,6 +251,19 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]) {
     // handled = true;
     // fs->cyclesReported[core] = magicMem[1];
     // printf("[fesrv]   reports %lu cycles\n", fs->cyclesReported[core]);
+  case SYS_calc_done:
+      //Copy data from host to snitch memory
+      uint32_t *host_ptr = (uint32_t *)fs->dev->dma.v_addr;
+      uint32_t *snitch_ptr = (uint32_t *)fs->dev->l3l->heap;
+
+      uint32_t length = snitch_ptr[0];
+
+      for (uint32_t i = 0; i < length; i++) {
+        host_ptr[i] = snitch_ptr[i];
+      }
+      snitch_host_req_set(fs->dev, 0xffffffff);
+
+    break;
   default:
     break;
   }
