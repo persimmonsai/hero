@@ -31,7 +31,7 @@
 #define SYS_read 63
 #define SYS_wake 1235
 #define SYS_cycle 1236
-#define SYS_calc_done 65
+#define SYS_task_done 65
 
 #define SnitchOpCompute 0xc000000e
 #define SnitchOpTerminate 0xffffffff
@@ -40,8 +40,10 @@
 
 #define HostOpRequestCompute 0x01
 #define HostOpRequestTerminate 0xff
+//Host ack
+#define HostOpRequestIdle 0
 
-static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6], bool * snitch_op_requested);
+static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]);
 
 #define PUTCHAR_BUF_SIZE 200
 
@@ -129,10 +131,20 @@ void fesrv_run(fesrv_t *fs) {
 
   while (!abort) {
 
+
+    uint32_t host_req_data = snitch_host_req_get(fs->dev, 1);
+    uint32_t host_req_op = HostOpRequestGet(host_req_data);
+
+    //Wait for host_responce
+    if (snitch_op_requested) {
+      if (host_req_op == HostOpRequestIdle) {
+        snitch_op_requested = false;
+        snitch_host_req_set(fs->dev, 0x0);
+      }
+    }
+
     // Read host requests
     if (!snitch_op_requested) {
-      uint32_t host_req_data = snitch_host_req_get(fs->dev);
-      uint32_t host_req_op = HostOpRequestGet(host_req_data);
       if (host_req_op) {
         snitch_op_requested = true;
         printf("[fesrv] Snitch op requested: %d\n", host_req_op);
@@ -149,13 +161,16 @@ void fesrv_run(fesrv_t *fs) {
                   snitch_ptr[i] = host_ptr[i];
                 }
           #endif
-              snitch_host_req_set(fs->dev, 0x0);
-              snitch_mbox_write(fs->dev, HostOpRequestCompute);
+              snitch_mbox_write(fs->dev, SnitchOpCompute);
               break;
           }
           case HostOpRequestTerminate: {
+              snitch_op_requested = false;
               snitch_mbox_write(fs->dev, SnitchOpTerminate);
               break;
+          }
+          default: {
+            snitch_op_requested = false;
           }
         }
       }
@@ -185,7 +200,7 @@ void fesrv_run(fesrv_t *fs) {
 
       // process
       fs->nCalls++;
-      handleSyscall(fs, magicMem, &snitch_op_requested);
+      handleSyscall(fs, magicMem);
 
 #ifdef DBG_LOG
       struct timespec tv;
@@ -234,7 +249,7 @@ void fesrv_run(fesrv_t *fs) {
  *
  * @param magicMem magic memory passed from snitch to host
  */
-static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6], bool * snitch_op_requested) {
+static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]) {
   bool handled = false;
 
   switch (magicMem[0]) {
@@ -276,8 +291,9 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6], bool * snitch_op_re
     // handled = true;
     // fs->cyclesReported[core] = magicMem[1];
     // printf("[fesrv]   reports %lu cycles\n", fs->cyclesReported[core]);
-  case SYS_calc_done:
+  case SYS_task_done:
       handled = true;
+      printf("[fesrv] Received SYS_task_done\n");
       //Copy data from host to snitch memory
 #if 0
       uint32_t *host_ptr = (uint32_t *)fs->dev->dma.v_addr;
@@ -290,9 +306,6 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6], bool * snitch_op_re
       }
 #endif
       snitch_host_req_set(fs->dev, 0xffffffff);
-      *snitch_op_requested = false;
-      snitch_mbox_write(fs->dev, 0xdead);
-
     break;
   default:
     break;

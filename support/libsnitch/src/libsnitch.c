@@ -66,6 +66,8 @@ static SnitchSubDev *g_dma = NULL;
 struct O1HeapInstance *g_l3_heap_mgr = NULL;
 uint64_t g_l3_data_offset = 0;
 
+static useconds_t host_req_get_tstamp;
+
 // ----------------------------------------------------------------------------
 //
 //   Public functions
@@ -492,10 +494,14 @@ int snitch_ipi_get(snitch_dev_t *dev, uint32_t reg, uint32_t *mask) {
   return ret;
 }
 
-uint32_t snitch_host_req_get (snitch_dev_t *dev) {
+uint32_t snitch_host_req_get (snitch_dev_t *dev, useconds_t poll_interval) {
   struct snios_reg sreg_gpio = {0};
-  ioctl(dev->fd, SNIOS_GPIO_R, &sreg_gpio);
-  return sreg_gpio.val;
+
+  if (time(NULL) > (poll_interval + host_req_get_tstamp)) {
+    ioctl(dev->fd, SNIOS_GPIO_R, &sreg_gpio);
+    host_req_get_tstamp = time(NULL);
+    return sreg_gpio.val;
+  }
 }
 
 uint32_t snitch_host_req_set (snitch_dev_t *dev, uint32_t val) {

@@ -130,7 +130,7 @@ int main(void) {
             core_num - 1, snrt_is_dm_core());
           snrt_mutex_release(&print_lock);
 
-          syscall(SYS_calc_done, 0, 0, 0, 0, 0);
+          syscall(SYS_task_done, 0, 0, 0, 0, 0);
           break;
         }
         case SnitchOpTerminate: {

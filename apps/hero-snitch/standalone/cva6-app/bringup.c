@@ -96,7 +96,7 @@ int main(int argc, char *argv[]) {
     cluster_idx = atoi(argv[3]);
   if (argc >= 5)
     wake_up_core = atoi(argv[4]);
-  
+
   printf("  Wake up core = %d\n", wake_up_core);
   printf("  Running on cluster %d\n", cluster_idx);
 
@@ -226,7 +226,7 @@ int main(int argc, char *argv[]) {
 
     printf("Waiting for program to terminate..\n");
     fflush(stdout);
-    fs->abortAfter = 30;
+    fs->abortAfter = 0;
     fesrv_run(fs);
     // sleep(3);
 

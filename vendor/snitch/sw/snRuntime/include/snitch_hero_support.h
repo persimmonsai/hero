@@ -14,7 +14,7 @@
 #define SYS_read 63
 #define SYS_wake 1235
 #define SYS_cycle 1236
-#define SYS_calc_done 65
+#define SYS_task_done 65
 
 #define SnitchOpCompute 0xc000000e
 #define SnitchOpTerminate 0xffffffff
