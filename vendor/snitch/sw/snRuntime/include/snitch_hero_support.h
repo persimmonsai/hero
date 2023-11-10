@@ -16,6 +16,9 @@
 #define SYS_cycle 1236
 #define SYS_calc_done 65
 
+#define SnitchOpCompute 0xc000000e
+#define SnitchOpTerminate 0xffffffff
+
 /***********************************************************************************
  * TYPES
  ***********************************************************************************/

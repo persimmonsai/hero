@@ -304,7 +304,7 @@ static long snitch_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
     info("(CMD SNIOS_GPIO_R)\n");
     sreg.off = 4;
     sreg.val = gpio_reg_read(sreg.off);
-    info("scratch read reg %d val %#x\n", sreg.off, sreg.val);
+    info("gpio read reg %d val %#x\n", sreg.off, sreg.val);
     if (copy_to_user(p, &sreg, sizeof(sreg)))
       return -EFAULT;
     return 0;
