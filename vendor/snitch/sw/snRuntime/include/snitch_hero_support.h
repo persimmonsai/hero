@@ -16,7 +16,8 @@
 #define SYS_cycle 1236
 #define SYS_task_done 65
 
-#define SnitchOpCompute 0xc000000e
+#define SnitchOpCompute 0xce000000
+#define SnitchOpMul 0xce000001
 #define SnitchOpTerminate 0xffffffff
 
 /***********************************************************************************

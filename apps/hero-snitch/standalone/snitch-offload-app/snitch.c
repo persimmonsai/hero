@@ -18,6 +18,7 @@ extern volatile struct ring_buf *g_a2h_mbox;
 extern volatile struct ring_buf *g_h2a_mbox;
 static volatile int32_t print_lock = 0;
 static volatile uint8_t *l3;
+static volatile uint32_t *dma = NULL;
 
 #define FILE_SIZE 128
 uint8_t file_content[FILE_SIZE];
@@ -41,6 +42,8 @@ int main(void) {
   if (snrt_is_dm_core()) {
     // Read memory layout from scratch2 (L3)
     memcpy(&l3l, (void *)soc_scratch[2], sizeof(struct l3_layout));
+    dma = (uint32_t *)soc_scratch[3];
+
     // Setup mailboxes (in L3)
     g_a2h_rb = (struct ring_buf *)l3l.a2h_rb;
     g_a2h_mbox = (struct ring_buf *)l3l.a2h_mbox;
@@ -51,6 +54,7 @@ int main(void) {
 
     printf("(cluster %u, idx %u/%u, is_dma = %i) Finished setting up mailboxes\n", cluster_idx,
             core_idx, core_num - 1, snrt_is_dm_core());
+    printf("Coherent memory phys addr = 0x%p\n", dma);
     snrt_mutex_release(&print_lock);
   }
 
@@ -126,12 +130,34 @@ int main(void) {
       switch (op_req) {
         case SnitchOpCompute: {
           snrt_mutex_lock(&print_lock);
-          printf("(cluster %u, idx %u/%u, is_dma = %i) Computaion done!\n", cluster_idx, core_idx,
+          printf("(cluster %u, idx %u/%u, is_dma = %i) Dummy request done\n", cluster_idx, core_idx,
             core_num - 1, snrt_is_dm_core());
           snrt_mutex_release(&print_lock);
 
-          syscall(SYS_task_done, 0, 0, 0, 0, 0);
+          snrt_cluster_hw_barrier();
+          syscall(SYS_exit, 0, 0, 0, 0, 0);
           break;
+        }
+        case SnitchOpMul: {
+          uint32_t data_length = dma[0];
+          snrt_mutex_lock(&print_lock);
+          printf("(cluster %u, idx %u/%u, is_dma = %i) Request multiplication, length = %d\n", cluster_idx, core_idx,
+            core_num - 1, snrt_is_dm_core(), data_length);
+          snrt_mutex_release(&print_lock);
+
+          uint32_t prod = 1;
+          uint32_t *data_ptr = dma + 1;
+          for (uint32_t i = 0; i < data_length; i++) {
+              prod *= data_ptr[i];
+          }
+          snrt_mutex_lock(&print_lock);
+          printf("Product = %d\n", prod);
+          snrt_mutex_release(&print_lock);
+          dma[0] = 1;
+          dma[1] = prod;
+
+          snrt_cluster_hw_barrier();
+          syscall(SYS_exit, 0, 0, 0, 0, 0);
         }
         case SnitchOpTerminate: {
           sys_exit_cmd = 1;

@@ -33,12 +33,14 @@
 #define SYS_cycle 1236
 #define SYS_task_done 65
 
-#define SnitchOpCompute 0xc000000e
+#define SnitchOpCompute 0xce000000
+#define SnitchOpMul 0xce000001
 #define SnitchOpTerminate 0xffffffff
 
 #define HostOpRequestGet(_v) (((_v) >> 24) & 0xff)
 
 #define HostOpRequestCompute 0x01
+#define HostOpRequestMul 0x02
 #define HostOpRequestTerminate 0xff
 //Host ack
 #define HostOpRequestIdle 0
@@ -139,6 +141,7 @@ void fesrv_run(fesrv_t *fs) {
     if (snitch_op_requested) {
       if (host_req_op == HostOpRequestIdle) {
         snitch_op_requested = false;
+        printf("[fesrv] Got response from host\n");
         snitch_host_req_set(fs->dev, 0x0);
       }
     }
@@ -163,6 +166,9 @@ void fesrv_run(fesrv_t *fs) {
           #endif
               snitch_mbox_write(fs->dev, SnitchOpCompute);
               break;
+          }
+          case HostOpRequestMul: {
+            snitch_mbox_write(fs->dev, SnitchOpMul);
           }
           case HostOpRequestTerminate: {
               snitch_op_requested = false;
@@ -225,8 +231,13 @@ void fesrv_run(fesrv_t *fs) {
       abort_reason = "timeout";
     }
     if (fs->coreExited) {
-      abort = true;
-      abort_reason = "exit code";
+      if (!fs->exitCode) {
+        //Just skip, that means task is done
+        fs->coreExited = 0;
+      } else {
+        abort = true;
+        abort_reason = "exit code";
+      }
     }
     if (g_interrupt) {
       abort = true;

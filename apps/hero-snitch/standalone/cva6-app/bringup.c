@@ -118,6 +118,7 @@ int main(int argc, char *argv[]) {
 
   // Use L3 layout struct from the cluster provided as argument and set it's pointer in scratch[2]
   ret = snitch_scratch_reg_write(snitch, 2, (uint32_t)(uintptr_t)snitch->l3l_p);
+  ret = snitch_scratch_reg_write(snitch, 3, (uint32_t)(uintptr_t)snitch->dma.p_addr);
 
   snitch_test_read_regions(snitch, 0);
 
