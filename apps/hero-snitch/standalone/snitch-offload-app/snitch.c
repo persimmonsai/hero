@@ -2,6 +2,7 @@
 
 #include "printf.h"
 #include "snrt.h"
+#include "accel_if.h"
 
 // #include "../include/snitch_common.h"
 #include "snitch_hero_support.h"
@@ -67,53 +68,6 @@ int main(void) {
 
   snrt_cluster_hw_barrier();
 
-  // From now on every thing is initialized
-
-  /* Get file */
-
-  if (snrt_is_dm_core()) {
-    snrt_mutex_lock(&print_lock);
-    printf("\n(cluster %u, idx %u/%u, is_dma = %i) Reading data from L3:", cluster_idx, core_idx,
-           core_num - 1, snrt_is_dm_core());
-    for (unsigned int i = 0; i < FILE_SIZE; i++) {
-      file_content[i] = l3[i];
-      if (i % 16 == 0) {
-        printf("\n%#x -> %#x -- ", &l3[i], &file_content[i]);
-      }
-      printf("%x", file_content[i]);
-    }
-    printf("\n");
-    snrt_mutex_release(&print_lock);
-  }
-
-  snrt_cluster_hw_barrier();
-
-  /* Print file */
-  if (!snrt_is_dm_core()) {
-    snrt_mutex_lock(&print_lock);
-    printf("(cluster %u, idx %u/%u, is_dma = %i) Printing data from L2:\n %s\n", cluster_idx, core_idx, core_num - 1,
-           snrt_is_dm_core(), file_content);
-    snrt_mutex_release(&print_lock);
-  }
-
-  snrt_cluster_hw_barrier();
-
-  /* Print FP test */
-  if (!snrt_is_dm_core()) {
-    uint16_t act_hex = 0x000094a2;
-    uint16_t img_hex = 0x00002905;
-    uint16_t weight_hex = 0x0000275f;
-    __fp16 act = *((__fp16 volatile *)&act_hex);
-    __fp16 img = *((__fp16 volatile *)&img_hex);
-    __fp16 weight = *((__fp16 volatile *)&weight_hex);
-    __fp16 volatile mac_trigger;
-    mac_trigger = act + img * weight;
-    snrt_mutex_lock(&print_lock);
-    printf("(cluster %u, idx %u/%u, is_dma = %i) MAC trigger: %f\n", cluster_idx, core_idx,
-           core_num - 1, snrt_is_dm_core(), mac_trigger);
-    snrt_mutex_release(&print_lock);
-  }
-
   if (!snrt_is_dm_core()) {
     while (!sys_exit_cmd) {
       uint32_t buffer[1];
@@ -129,47 +83,64 @@ int main(void) {
       uint32_t op_req = buffer[0];
       switch (op_req) {
         case SnitchOpCompute: {
+          SnitchAccelData_t accel_data = {0};
+          h2a_get_data(dma, &accel_data);
+
+          SnitchCoreData_t *core_data = &accel_data.coreData[core_idx];
+#if 0
           snrt_mutex_lock(&print_lock);
-          printf("(cluster %u, idx %u/%u, is_dma = %i) Dummy request done\n", cluster_idx, core_idx,
+          printf("[COMPUTE] (cluster %u, idx %u/%u, is_dma = %i)\n", cluster_idx, core_idx,
             core_num - 1, snrt_is_dm_core());
-          snrt_mutex_release(&print_lock);
 
-          snrt_cluster_hw_barrier();
-          syscall(SYS_exit, 0, 0, 0, 0, 0);
-          break;
-        }
-        case SnitchOpMul: {
-          uint32_t data_length = dma[0];
-          snrt_mutex_lock(&print_lock);
-          printf("(cluster %u, idx %u/%u, is_dma = %i) Request multiplication, length = %d\n", cluster_idx, core_idx,
-            core_num - 1, snrt_is_dm_core(), data_length);
-          snrt_mutex_release(&print_lock);
-
-          uint32_t prod = 1;
-          uint32_t *data_ptr = dma + 1;
-          for (uint32_t i = 0; i < data_length; i++) {
-              prod *= data_ptr[i];
+          printf("[COMPUTE] Request: op = %d, payload_length = %d, is_valid = %d\n", core_data->op, core_data->size, core_data->is_valid);
+          printf("payload_ptr = 0x%p\n", core_data->data);
+          for (uint32_t i = 0; i < core_data->size; i++) {
+            printf("data[%d] = 0x%x\n", i, core_data->data[i]);
           }
-          snrt_mutex_lock(&print_lock);
-          printf("Product = %d\n", prod);
           snrt_mutex_release(&print_lock);
-          dma[0] = 1;
-          dma[1] = prod;
+#endif
+          if (core_data->is_valid) {
+            switch (core_data->op) {
+              case 0x1: {
+                uint32_t result = core_data->data[0];
+                for (uint32_t i = 1; i < core_data->size; i++) {
+                  result = fp32_mul(result, core_data->data[i]);
+                }
+                h2a_put_data_1(dma, result);
 
-          snrt_cluster_hw_barrier();
-          syscall(SYS_exit, 0, 0, 0, 0, 0);
+#if 0
+                snrt_mutex_lock(&print_lock);
+                printf("[COMPUTE] (cluster %u, idx %u/%u, is_dma = %i) DONE!, result = %d\n", cluster_idx, core_idx,
+                core_num - 1, snrt_is_dm_core(), result);
+                snrt_mutex_release(&print_lock);
+#endif
+                //snrt_cluster_hw_barrier();
+                syscall(SYS_exit, 0, 0, 0, 0, 0);
+                break;
+              }
+              default: {
+                //snrt_cluster_hw_barrier();
+                syscall(SYS_exit, 1, 0, 0, 0, 0);
+              }
+            }
+          }
+          break;
         }
         case SnitchOpTerminate: {
           sys_exit_cmd = 1;
           /* Barrier before exiting */
-          snrt_cluster_hw_barrier();
-          syscall(SYS_exit, 0, 0, 0, 0, 0);
+          //snrt_cluster_hw_barrier();
+          syscall(SYS_exit, 1, 0, 0, 0, 0);
           break;
         }
         default: {
         }
       }
     }
+  }
+
+  if (snrt_is_dm_core()) {
+    while (1) {}
   }
 
   return 0;
