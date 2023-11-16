@@ -8,7 +8,8 @@ MKFILE_DIR  := $(dir $(MKFILE_PATH))
 ROOT        := ${MKFILE_DIR}../../../..
 #include $(ROOT)/util/Makefrag.mk
 
-OBJ_C := common.o
+OBJ_C += common.o
+OBJ_C += fesrv.o
 APPS  := bringup
 
 # Toolchain
@@ -21,7 +22,7 @@ RV64_AR      ?= $(HERO_INSTALL)/bin/riscv64-hero-linux-gnu-ar
 
 # C flags
 CFLAGS    += -Wall -O0 -g -rdynamic -fPIC
-INC_FLAGS := -I$(ROOT)/support/include -I$(ROOT)/support/libsnitch/include -I$(ROOT)/support/libsnitch/include -I$(ROOT)/support/snitch-driver 
+INC_FLAGS := -I$(ROOT)/support/include -I$(ROOT)/support/libsnitch/include -I$(ROOT)/support/libsnitch/include -I$(ROOT)/support/snitch-driver
 
 DEPDIR 		:= .deps
 DEPFLAGS 	= -MMD -MP

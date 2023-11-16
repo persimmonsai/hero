@@ -1,40 +1,32 @@
-/*
- * @Author: Noah Huetter
- * @Date:   2020-09-25 14:29:49
- * @Last Modified by:   Noah Huetter
- * @Last Modified time: 2020-10-23 15:01:24
- */
-
-/**
- * This is a very simple implementation of the RISC-V front end server
- * Intended to use for only a single snitch cluster
- *
- */
-
-#include "fesrv.h"
-#include "debug.h"
-
 #include <assert.h>
-#include <signal.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include <errno.h>
+#include <fcntl.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
-#include <unistd.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <signal.h>
 
-// #define dbg(...) printf(__VA_ARGS__)
-#define dbg(fmt, ...)
+#include "fesrv_local.h"
+#include "libsnitch.h"
+#include "snitch_common.h"
+
+#define PUTCHAR_BUF_SIZE 200
+
+#define pr_info(args ...) printf(args)
+#define pr_error(args ...) printf(args)
+#define pr_warn(args ...) printf(args)
+#define dbg(args ...)
 
 #define SYS_exit 60
 #define SYS_write 64
 #define SYS_read 63
 #define SYS_wake 1235
 #define SYS_cycle 1236
-#define SYS_task_done 65
 
 #define SnitchOpCompute 0xce000000
-#define SnitchOpMul 0xce000001
 #define SnitchOpTerminate 0xffffffff
 
 #define HostOpRequestGet(_v) (((_v) >> 24) & 0xff)
@@ -43,55 +35,14 @@
 #define HostOpRequestMul 0x02
 #define HostOpRequestTerminate 0xff
 //Host ack
-#define HostOpRequestIdle 0
+#define HostOpResponse 0xd05e0000
+//Snitch Ack
+#define SnitchOpResponse 0x5e550000
 
-static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]);
-
-#define PUTCHAR_BUF_SIZE 200
-
-#define DBG_LOG
-#define XSTR(var) #var
-
-/**
- * @brief Init front end server with default settings
- * @param fs pointer to front end server struct
- * @param a2h_rb_p physical address of a2h ring buffer is stored here to be passed to the
- * accelerator
- */
-void fesrv_init(fesrv_t *fs, snitch_dev_t *dev, void **a2h_rb_p, uint32_t a2hrb_elements) {
-  void *addr;
-
-  fs->dev = dev;
-  fs->pollInterval = 10 * 1000; // [us]
-  fs->abortAfter = 0;
-
-  // state
-  fs->abort = false;
-  fs->nCalls = 0;
-  fs->coreExited = 0;
-
-  // allocate an acceleartor to host ring buffer where each element is 6*sizeof(uint64_t) to support
-  // syscalls to fesrv
-  const unsigned a2hrb_element_size = sizeof(uint64_t) * 6;
-  fs->a2h_rb = (struct ring_buf *)snitch_l3_malloc(fs->dev, sizeof(struct ring_buf), a2h_rb_p);
-  assert(fs->a2h_rb);
-  fs->a2h_rb->data_v =
-      (uint64_t)snitch_l3_malloc(fs->dev, a2hrb_element_size * a2hrb_elements, &addr);
-  assert(fs->a2h_rb->data_v);
-  fs->a2h_rb->data_p = (uint64_t)addr;
-  rb_init(fs->a2h_rb, a2hrb_elements, a2hrb_element_size);
-
-  // putchar buffer
-  fs->putCharBuf = malloc(PUTCHAR_BUF_SIZE * sizeof(char));
-  assert(fs->putCharBuf);
-  fs->putCharIdx = 0;
-
-  // file logging
-  fs->stdout_file = fopen("fesrv_stdout.log", "a");
-#ifdef DBG_LOG
-  fs->logfile = fopen("fesrv.log", "w");
-#endif
-}
+typedef enum {
+  SnitchStateProc = 0,
+  SnitchStateIdle = 1,
+} SnitchSrvState_e;
 
 static volatile int g_interrupt = 0;
 
@@ -100,13 +51,66 @@ static void intHandler(int dummy) {
   pr_info("[fesrv] Caught signal, aborting\n");
 }
 
+static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]);
+
+static SnitchSrvState_e snitch_state = SnitchStateIdle;
+
+static void handleHostReqResp (fesrv_t *fs) {
+
+    uint32_t host_req_data = 0;
+    uint32_t host_req_op = 0;
+
+    host_req_data = snitch_host_req_get(fs->dev);
+
+    host_req_op = HostOpRequestGet(host_req_data);
+
+    switch (snitch_state) {
+      case SnitchStateIdle: {
+        switch (host_req_op) {
+            case HostOpRequestCompute: {
+            //Copy data from host to snitch memory
+            #if 0
+                    uint32_t *host_ptr = (uint32_t *)fs->dev->dma.v_addr;
+                    uint32_t *snitch_ptr = (uint32_t *)fs->dev->l3l->heap;
+
+                    uint32_t length = host_ptr[0];
+
+                    for (uint32_t i = 0; i < length; i++) {
+                    snitch_ptr[i] = host_ptr[i];
+                    }
+            #endif
+                snitch_mbox_write(fs->dev, SnitchOpCompute);
+                printf("[fesrv] SnitchStateIdle -> SnitchStateProc\n");
+                snitch_state = SnitchStateProc;
+                break;
+            }
+            case HostOpRequestTerminate: {
+                snitch_mbox_write(fs->dev, SnitchOpTerminate);
+                break;
+            }
+            default: {
+            }
+        }
+        break;
+      }
+      case SnitchStateProc: {
+        if (host_req_data == HostOpResponse) {
+          snitch_state = SnitchStateIdle;
+          snitch_host_req_set(fs->dev, 0);
+          printf("[fesrv]  SnitchStateProc -> SnitchStateIdle\n");
+        }
+        break;
+      }
+    }
+}
+
 /**
  * @brief Runs the front end server. Best to run this as a thread
  * @details
  *
  * @param fs pointer to the front end server struct
  */
-void fesrv_run(fesrv_t *fs) {
+void fesrv_local_run(fesrv_t *fs) {
   uint64_t magicMem[6];
   bool autoAbort;
   useconds_t tstart;
@@ -128,9 +132,18 @@ void fesrv_run(fesrv_t *fs) {
    */
   bool abort = false;
   bool wait = true;
+  snitch_state = SnitchStateIdle;
+  uint32_t host_req_get_timeout = 0;
+  snitch_host_req_set(fs->dev, 0);
   tstart = time(NULL);
 
   while (!abort) {
+
+    if (!host_req_get_timeout) {
+        host_req_get_timeout = 10;
+        handleHostReqResp(fs);
+    }
+    host_req_get_timeout--;
 
     // try to pop a value
     // snitch_flush(fs->dev);
@@ -181,13 +194,8 @@ void fesrv_run(fesrv_t *fs) {
       abort_reason = "timeout";
     }
     if (fs->coreExited) {
-      if (!fs->exitCode) {
-        //Just skip, that means task is done
-        fs->coreExited = 0;
-      } else {
-        abort = true;
-        abort_reason = "exit code";
-      }
+      abort = true;
+      abort_reason = "exit code";
     }
     if (g_interrupt) {
       abort = true;
@@ -240,9 +248,16 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]) {
     break;
   case SYS_exit:
     handled = true;
-    pr_info("[fesrv]   Exited with code %d (%#lx)\n", (int)magicMem[1], magicMem[1]);
-    fs->coreExited = 1;
-    fs->exitCode = (int)magicMem[1];
+
+    int exit_code = (int)magicMem[1];
+    if (exit_code == 0) {
+      pr_info("[fesrv] Sending response to host\n");
+      snitch_host_req_set(fs->dev, SnitchOpResponse);
+    } else {
+      pr_info("[fesrv]   Exited with code %d (%#lx)\n", (int)magicMem[1], magicMem[1]);
+      fs->coreExited = 1;
+      fs->exitCode = exit_code;
+    }
     break;
   case SYS_wake:
     handled = true;
@@ -263,4 +278,6 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]) {
     pr_error("[fesrv]   2: %016lx 3: %016lx\n", magicMem[2], magicMem[3]);
     pr_error("[fesrv]   4: %016lx 5: %016lx\n", magicMem[4], magicMem[5]);
   }
+
+  fflush(stdout);
 }

@@ -494,15 +494,10 @@ int snitch_ipi_get(snitch_dev_t *dev, uint32_t reg, uint32_t *mask) {
   return ret;
 }
 
-uint32_t snitch_host_req_get (snitch_dev_t *dev, useconds_t poll_interval) {
+uint32_t snitch_host_req_get (snitch_dev_t *dev) {
   struct snios_reg sreg_gpio = {0};
-
-  if (time(NULL) > (poll_interval + host_req_get_tstamp)) {
-    ioctl(dev->fd, SNIOS_GPIO_R, &sreg_gpio);
-    host_req_get_tstamp = time(NULL);
-    return sreg_gpio.val;
-  }
-  return 0;
+  ioctl(dev->fd, SNIOS_GPIO_R, &sreg_gpio);
+  return sreg_gpio.val;
 }
 
 uint32_t snitch_host_req_set (snitch_dev_t *dev, uint32_t val) {

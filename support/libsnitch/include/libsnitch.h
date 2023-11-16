@@ -285,7 +285,7 @@ void snitch_set_device_loglevel(snitch_dev_t *dev, int lvl);
 
 int snitch_test_read_regions(snitch_dev_t *dev, uint32_t reg);
 
-uint32_t snitch_host_req_get (snitch_dev_t *dev, useconds_t poll_interval);
+uint32_t snitch_host_req_get (snitch_dev_t *dev);
 uint32_t snitch_host_req_set (snitch_dev_t *dev, uint32_t val);
 
 //!@}
