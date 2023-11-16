@@ -26,24 +26,6 @@
 #define SYS_wake 1235
 #define SYS_cycle 1236
 
-#define SnitchOpCompute 0xce000000
-#define SnitchOpTerminate 0xffffffff
-
-#define HostOpRequestGet(_v) (((_v) >> 24) & 0xff)
-
-#define HostOpRequestCompute 0x01
-#define HostOpRequestMul 0x02
-#define HostOpRequestTerminate 0xff
-//Host ack
-#define HostOpResponse 0xd05e0000
-//Snitch Ack
-#define SnitchOpResponse 0x5e550000
-
-typedef enum {
-  SnitchStateProc = 0,
-  SnitchStateIdle = 1,
-} SnitchSrvState_e;
-
 static volatile int g_interrupt = 0;
 
 static void intHandler(int dummy) {
@@ -52,57 +34,6 @@ static void intHandler(int dummy) {
 }
 
 static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]);
-
-static SnitchSrvState_e snitch_state = SnitchStateIdle;
-
-static void handleHostReqResp (fesrv_t *fs) {
-
-    uint32_t host_req_data = 0;
-    uint32_t host_req_op = 0;
-
-    host_req_data = snitch_host_req_get(fs->dev);
-
-    host_req_op = HostOpRequestGet(host_req_data);
-
-    switch (snitch_state) {
-      case SnitchStateIdle: {
-        switch (host_req_op) {
-            case HostOpRequestCompute: {
-            //Copy data from host to snitch memory
-            #if 0
-                    uint32_t *host_ptr = (uint32_t *)fs->dev->dma.v_addr;
-                    uint32_t *snitch_ptr = (uint32_t *)fs->dev->l3l->heap;
-
-                    uint32_t length = host_ptr[0];
-
-                    for (uint32_t i = 0; i < length; i++) {
-                    snitch_ptr[i] = host_ptr[i];
-                    }
-            #endif
-                snitch_mbox_write(fs->dev, SnitchOpCompute);
-                printf("[fesrv] SnitchStateIdle -> SnitchStateProc\n");
-                snitch_state = SnitchStateProc;
-                break;
-            }
-            case HostOpRequestTerminate: {
-                snitch_mbox_write(fs->dev, SnitchOpTerminate);
-                break;
-            }
-            default: {
-            }
-        }
-        break;
-      }
-      case SnitchStateProc: {
-        if (host_req_data == HostOpResponse) {
-          snitch_state = SnitchStateIdle;
-          snitch_host_req_set(fs->dev, 0);
-          printf("[fesrv]  SnitchStateProc -> SnitchStateIdle\n");
-        }
-        break;
-      }
-    }
-}
 
 /**
  * @brief Runs the front end server. Best to run this as a thread
@@ -132,19 +63,9 @@ void fesrv_local_run(fesrv_t *fs) {
    */
   bool abort = false;
   bool wait = true;
-  snitch_state = SnitchStateIdle;
-  uint32_t host_req_get_timeout = 0;
-  snitch_host_req_set(fs->dev, 0);
   tstart = time(NULL);
 
   while (!abort) {
-
-    if (!host_req_get_timeout) {
-        host_req_get_timeout = 10;
-        handleHostReqResp(fs);
-    }
-    host_req_get_timeout--;
-
     // try to pop a value
     // snitch_flush(fs->dev);
     ret = rb_host_get(fs->a2h_rb, magicMem);
@@ -250,14 +171,8 @@ static void handleSyscall(fesrv_t *fs, uint64_t magicMem[6]) {
     handled = true;
 
     int exit_code = (int)magicMem[1];
-    if (exit_code == 0) {
-      pr_info("[fesrv] Sending response to host\n");
-      snitch_host_req_set(fs->dev, SnitchOpResponse);
-    } else {
-      pr_info("[fesrv]   Exited with code %d (%#lx)\n", (int)magicMem[1], magicMem[1]);
-      fs->coreExited = 1;
-      fs->exitCode = exit_code;
-    }
+    fs->coreExited = 1;
+    fs->exitCode = exit_code;
     break;
   case SYS_wake:
     handled = true;

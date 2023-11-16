@@ -20,9 +20,11 @@ typedef struct {
     SnitchCoreData_t coreData[8];
 } SnitchAccelData_t;
 
+int h2a_has_request (void *_payload);
 int h2a_get_data (void *_payload, SnitchAccelData_t *data);
 int h2a_put_data_1 (void *_payload, data_t result);
 
-uint32_t fp32_mul (uint32_t a, uint32_t b);
+uint32_t task_fp32_mul_1 (uint32_t a, uint32_t b);
+uint32_t task_fp32_max (uint32_t *input, uint32_t input_len);
 
 #endif SNITCH_ACCEL_H
