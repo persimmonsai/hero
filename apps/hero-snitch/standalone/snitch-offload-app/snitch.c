@@ -24,6 +24,13 @@ static volatile uint32_t *dma = NULL;
 #define FILE_SIZE 128
 uint8_t file_content[FILE_SIZE];
 
+static void print_f32_result (int *lock, float *result) {
+  uint32_t u32 = fp32_to_u32(*result);
+  snrt_mutex_lock(lock);
+  printf("result = 0x%x\n", u32);
+  snrt_mutex_release(lock);
+}
+
 static void a2h_handle_request (unsigned core_idx) {
 
   SnitchAccelData_t accel_data = {0};
@@ -37,21 +44,43 @@ static void a2h_handle_request (unsigned core_idx) {
 
   snrt_mutex_lock(&print_lock);
   printf("[TASK] (core idx %u, is_dma = %i) a2h request received:  %d\n", core_idx, snrt_is_dm_core(), core_data->op);
+  for (unsigned i = 0 ;  i < core_data->size; i++) {
+    printf("0x%x\n", core_data->data[i]);
+  }
   snrt_mutex_release(&print_lock);
+
 
   switch (core_data->op) {
     case 0x1: {
-      uint32_t result = core_data->data[0];
-      for (uint32_t i = 1; i < core_data->size; i++) {
-        result = task_fp32_mul_1(result, core_data->data[i]);
-      }
-      h2a_put_data_1(dma, result);
-      //snrt_cluster_hw_barrier();
+      float result = task_fp32_mul_fact(core_data->data, core_data->size);
+      print_f32_result(&print_lock, &result);
+      h2a_put_data_vector(dma, &result, 1);
       break;
     }
     case 0x2: {
-      uint32_t result = task_fp32_max(core_data->data, core_data->size);
-      h2a_put_data_1(dma, result);
+      float result = task_fp32_max(core_data->data, core_data->size);
+      print_f32_result(&print_lock, &result);
+      h2a_put_data_vector(dma, &result, 1);
+      break;
+    }
+    case 0x3: {
+      task_expf(core_data->data, core_data->size);
+      h2a_put_data_vector(dma, core_data->data, core_data->size);
+      break;
+    }
+    case 0x4: {
+      task_logf(core_data->data, core_data->size);
+      h2a_put_data_vector(dma, core_data->data, core_data->size);
+      break;
+    }
+    case 0x5: {
+      double result = task_fp64_mul_fact(core_data->data, core_data->size);
+      h2a_put_data_vector(dma, &result, sizeof(double) / sizeof(float));
+      break;
+    }
+    case 0x20: {
+      task_softmax(core_data->data, core_data->size);
+      h2a_put_data_vector(dma, core_data->data, core_data->size);
       break;
     }
     default: {

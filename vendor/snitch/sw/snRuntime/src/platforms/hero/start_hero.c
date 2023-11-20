@@ -94,7 +94,7 @@ void _snrt_init_team(uint32_t cluster_core_id, uint32_t cluster_core_num, void *
                      struct snrt_team_root *team) {
   (void)cluster_core_id;
   team->base.root = team;
-  team->bootdata = (void *)bootdata;
+  team->bootdata = *bootdata;
   team->global_core_base_hartid = bootdata->hartid_base;
   team->global_core_num =
       bootdata->core_count * bootdata->cluster_count * bootdata->s1_quadrant_count;
@@ -309,7 +309,7 @@ static int gomp_offload_manager() {
     cycles = read_csr(mcycle);
 
     offloadFn(offloadArgs);
-    
+
     cycles = read_csr(mcycle) - cycles;
     snrt_stop_perf_counter(SNRT_PERF_CNT0);
     snrt_stop_perf_counter(SNRT_PERF_CNT1);
@@ -318,7 +318,7 @@ static int gomp_offload_manager() {
 
     if (DEBUG_LEVEL_OFFLOAD_MANAGER > 0)
       snrt_trace("end offloading\n");
-    
+
     // (6) Report EOC and profiling
     snrt_info("cycles: %d issue_fpu: %d dma_busy: %d\r\n", cycles, issue_fpu, dma_busy);
 

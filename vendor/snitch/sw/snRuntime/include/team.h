@@ -8,6 +8,22 @@ extern __thread struct snrt_team *_snrt_team_current;
 extern __thread uint32_t _snrt_core_idx;
 extern const uint32_t _snrt_team_size;
 
+// The boot data generated along with the system RTL.
+// See `ip/test/src/tb_lib.hh` for details.
+struct snrt_cluster_bootdata {
+    uint32_t boot_addr;
+    uint32_t core_count;
+    uint32_t hartid_base;
+    uint32_t tcdm_start;
+    uint32_t tcdm_size;
+    uint32_t tcdm_offset;
+    uint64_t global_mem_start;
+    uint64_t global_mem_end;
+    uint32_t cluster_count;
+    uint32_t s1_quadrant_count;
+    uint32_t clint_base;
+};
+
 struct snrt_team {
     /// Pointer to the root team description of this cluster.
     struct snrt_team_root *root;
@@ -29,7 +45,7 @@ struct snrt_allocator {
 // This struct is placed at the end of each clusters TCDM
 struct snrt_team_root {
     struct snrt_team base;
-    const void *bootdata;
+    struct snrt_cluster_bootdata bootdata;
     uint32_t global_core_base_hartid;
     uint32_t global_core_num;
     uint32_t cluster_idx;

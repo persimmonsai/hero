@@ -10,10 +10,10 @@ int h2a_has_request (void *_payload) {
 int h2a_get_data (void *_payload, SnitchAccelData_t *data) {
     unsigned core_num = snrt_global_core_num();
     meta_t * meta = (meta_t *)_payload;
-    data_t * payload = (data_t *)(meta + META_SIZE);
+    float * payload = (float *)(meta + META_SIZE);
 
     uint32_t total_size = meta[0];
-    uint32_t payload_size = (total_size - META_SIZE_BYTES) / sizeof(data_t);
+    uint32_t payload_size = (total_size - META_SIZE_BYTES) / sizeof(float);
 
     data->coreData[0].op = meta[1];
     data->coreData[0].data = payload;
@@ -23,104 +23,69 @@ int h2a_get_data (void *_payload, SnitchAccelData_t *data) {
     return 0;
 }
 
-int h2a_put_data_1 (void *_payload, data_t result) {
+int h2a_put_data_vector (void *_payload, uint32_t *data, unsigned size) {
     meta_t * meta = (meta_t *)_payload;
-    data_t * data = meta + META_SIZE;
-    meta[0] = META_SIZE_BYTES + sizeof(data_t);
-    meta[1] = 0;
-    meta[2] = 1;
+    uint32_t * dst = meta + META_SIZE;
+    meta[0] = META_SIZE_BYTES + sizeof(uint32_t) * size;
+    meta[2] = size;
     meta[3] = 1;
-    data[0] = result;
+
+    for (unsigned i = 0; i < size; i++) {
+        dst[i] = data[i];
+    }
+    //Note: this operation must be the last as it acts as a signal to the host application
+    meta[1] = 0;
     return 0;
 }
 
-static inline uint32_t fp32_to_u32 (float _f) {
-    float f = _f;
-    uint32_t * uptr = (uint32_t *)(&f);
-    return *uptr;
+float task_fp32_mul_fact (float *data, unsigned size) {
+    float result = data[0];
+    for (unsigned i = 1; i < size; i++) {
+        result = result * data[i];
+    }
+    return result;
 }
 
-static inline uint32_t fp32_mul (uint32_t a, uint32_t b) {
-    uint32_t res;
-
-    asm volatile(
-    "fmv.w.x ft1, %0\n"
-    "fmv.w.x ft2, %1\n"
-    : "+r"(a), "+r"(b));
-
-    asm volatile(
-    "fmul.s ft0, ft1, ft2\n"
-    "fmv.x.w %0, ft0\n"
-    : "+r"(res));
-
-    return res;
+double task_fp64_mul_fact (double *data, unsigned size) {
+    double result = data[0];
+    for (unsigned i = 1; i < size; i++) {
+        result = result * data[i];
+    }
+    return result;
 }
 
-static inline uint32_t fp32_add (uint32_t a, uint32_t b) {
-    uint32_t res;
 
-    asm volatile(
-    "fmv.w.x ft1, %0\n"
-    "fmv.w.x ft2, %1\n"
-    : "+r"(a), "+r"(b));
-
-    asm volatile(
-    "fadd.s ft0, ft1, ft2\n"
-    "fmv.x.w %0, ft0\n"
-    : "+r"(res));
-
-    return res;
-}
-
-static inline uint32_t fp32_max (uint32_t a, uint32_t b) {
-    uint32_t res;
-    asm volatile(
-    "fmv.w.x ft1, %0\n"
-    "fmv.w.x ft2, %1\n"
-    : "+r"(a), "+r"(b));
-
-    asm volatile(
-    "fmax.d ft0, ft1, ft2\n"
-    "fmv.x.w %0, ft0\n"
-    : "+r"(res));
-
-    return res;
-}
-
-//true if a <= b
-static inline uint32_t fp32_le (uint32_t a, uint32_t b) {
-    uint32_t res;
-    asm volatile(
-    "fmv.w.x ft1, %0\n"
-    "fmv.w.x ft2, %1\n"
-    : "+r"(a), "+r"(b));
-
-    asm volatile(
-    "fle.s %0, ft1, ft2\n"
-    : "+r"(res));
-
-    return res;
-}
-
-uint32_t task_fp32_mul_1 (uint32_t a, uint32_t b) {
-    return fp32_mul(a, b);
-}
-
-uint32_t task_fp32_max (uint32_t *input, uint32_t input_len) {
-  uint32_t m = fp32_to_u32(-INFINITY);
-  for (size_t i = 0; i < input_len; i++) {
-    if (fp32_le(m, input[i])) {
-      m = input[i];
+float task_fp32_max (float *data, uint32_t len) {
+  float m = -INFINITY;
+  for (size_t i = 0; i < len; i++) {
+    if (data[i] > m) {
+        m = data[i];
     }
   }
   return m;
 }
 
-void softmax(uint32_t *input, uint32_t input_len) {
+void task_expf (float *input, size_t input_len) {
+    for (size_t i = 0; i < input_len; i++) {
+        input[i] = expf(input[i]);
+    }
+}
 
-  uint32_t m = task_fp32_max(input, input_len);
+void task_logf (float *input, size_t input_len) {
+    for (size_t i = 0; i < input_len; i++) {
+        input[i] = logf(input[i]);
+    }
+}
 
-  uint32_t sum = fp32_to_u32(0.0);
+void task_softmax(float *input, size_t input_len) {
+  float m = -INFINITY;
+  for (size_t i = 0; i < input_len; i++) {
+    if (input[i] > m) {
+      m = input[i];
+    }
+  }
+
+  float sum = 0.0;
   for (size_t i = 0; i < input_len; i++) {
     sum += expf(input[i] - m);
   }
