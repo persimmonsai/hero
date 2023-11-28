@@ -45,7 +45,7 @@ cd newlib-rv32
     AS_FOR_TARGET=${HERO_INSTALL}/bin/llvm-as         \
     LD_FOR_TARGET=${HERO_INSTALL}/bin/llvm-ld         \
     RANLIB_FOR_TARGET=${HERO_INSTALL}/bin/llvm-ranlib \
-    CC_FOR_TARGET="${HERO_INSTALL}/bin/clang -march=rv32imafd"
+    CC_FOR_TARGET="${HERO_INSTALL}/bin/clang -march=rv32imaf"
 
 make
 make install
@@ -72,9 +72,9 @@ ${CMAKE} -G"Unix Makefiles"                                                     
     -DCMAKE_C_COMPILER_TARGET="riscv32-unknown-elf"                          \
     -DCMAKE_CXX_COMPILER_TARGET="riscv32-unknown-elf"                        \
     -DCMAKE_ASM_COMPILER_TARGET="riscv32-unknown-elf"                        \
-    -DCMAKE_C_FLAGS="-march=rv32imafd -mabi=ilp32d"                          \
-    -DCMAKE_CXX_FLAGS="-march=rv32imafd -mabi=ilp32d"                        \
-    -DCMAKE_ASM_FLAGS="-march=rv32imafd -mabi=ilp32d"                        \
+    -DCMAKE_C_FLAGS="-march=rv32imaf -mabi=ilp32"                          \
+    -DCMAKE_CXX_FLAGS="-march=rv32imaf -mabi=ilp32"                        \
+    -DCMAKE_ASM_FLAGS="-march=rv32imaf -mabi=ilp32"                        \
     -DCMAKE_EXE_LINKER_FLAGS="-nostartfiles -nostdlib -fuse-ld=lld"          \
     -DCMAKE_SYSROOT="${HERO_INSTALL}/riscv32-unknown-elf"                   \
     -DCOMPILER_RT_BAREMETAL_BUILD=ON                                         \
