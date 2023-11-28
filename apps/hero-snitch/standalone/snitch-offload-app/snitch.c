@@ -31,66 +31,62 @@ static void print_f32_result (int *lock, float *result) {
   snrt_mutex_release(lock);
 }
 
-static void a2h_handle_request (unsigned core_idx) {
+static void a2h_handle_request (void) {
 
-  SnitchAccelData_t accel_data = {0};
-  h2a_get_data(dma, &accel_data);
-
-  SnitchCoreData_t *core_data = &accel_data.coreData[core_idx];
-
-  if (!core_data->is_valid) {
-    return;
-  }
+  unsigned core_idx = snrt_global_core_idx();
+  SnitchCoreData_t core_data = {0};
+  h2a_get_data(dma, &core_data);
 
   snrt_mutex_lock(&print_lock);
-  printf("[TASK] (core idx %u, is_dma = %i) a2h request received:  %d\n", core_idx, snrt_is_dm_core(), core_data->op);
-  for (unsigned i = 0 ;  i < core_data->size; i++) {
-    printf("0x%x\n", core_data->data[i]);
-  }
+  printf("[TASK] (core idx %u) a2h request received:  %d\n", core_idx, snrt_is_dm_core());
+  //uint32_t *data = (uint32_t *)core_data.data;
+  //for (unsigned i = 0 ;  i < core_data.size; i++) {
+  //  printf("0x%x\n", data[i]);
+  //}
   snrt_mutex_release(&print_lock);
 
 
-  switch (core_data->op) {
+  switch (core_data.op) {
     case 0x1: {
-      float result = task_fp32_mul_fact(core_data->data, core_data->size);
+      float result = task_fp32_mul_fact(core_data.data, core_data.size);
       print_f32_result(&print_lock, &result);
-      h2a_put_data_vector(dma, &result, 1);
+      h2a_put_data(dma, &result, 1);
       break;
     }
     case 0x2: {
-      float result = task_fp32_max(core_data->data, core_data->size);
+      float result = task_fp32_max(core_data.data, core_data.size);
       print_f32_result(&print_lock, &result);
-      h2a_put_data_vector(dma, &result, 1);
+      h2a_put_data(dma, &result, 1);
       break;
     }
     case 0x3: {
-      task_expf(core_data->data, core_data->size);
-      h2a_put_data_vector(dma, core_data->data, core_data->size);
+      task_expf(core_data.data, core_data.size);
+      h2a_put_data(dma, core_data.data, core_data.size);
       break;
     }
     case 0x4: {
-      task_logf(core_data->data, core_data->size);
-      h2a_put_data_vector(dma, core_data->data, core_data->size);
+      task_logf(core_data.data, core_data.size);
+      h2a_put_data(dma, core_data.data, core_data.size);
       break;
     }
-    case 0x5: {
-      double result = task_fp64_mul_fact(core_data->data, core_data->size);
-      h2a_put_data_vector(dma, &result, sizeof(double) / sizeof(float));
+    case 0x6: {
+      float result = task_fp32_div(core_data.data, core_data.size);
+      h2a_put_data(dma, &result, 1);
       break;
     }
     case 0x20: {
-      task_softmax(core_data->data, core_data->size);
-      h2a_put_data_vector(dma, core_data->data, core_data->size);
+      task_softmax(core_data.data, core_data.size);
+      h2a_put_data(dma, core_data.data, core_data.size);
       break;
     }
     default: {
-      //snrt_cluster_hw_barrier();
+      snrt_cluster_hw_barrier();
       syscall(SYS_exit, 0, 0, 0, 0, 0);
       while (1) {}
     }
   }
   snrt_mutex_lock(&print_lock);
-  printf("[TASK] (core idx %u, is_dma = %i) DONE!\n", core_idx, snrt_is_dm_core());
+  printf("[TASK] (core idx %u) DONE!\n", core_idx);
   snrt_mutex_release(&print_lock);
 }
 
@@ -107,9 +103,11 @@ int main(void) {
   unsigned cluster_idx = snrt_cluster_idx();
   unsigned core_idx = snrt_global_core_idx();
   unsigned core_num = snrt_global_core_num();
+  unsigned is_compute_core = core_idx != 0;
+  unsigned is_setup_core = core_idx == 0;
 
   // First core sets up the mailboxes and stuff
-  if (snrt_is_dm_core()) {
+  if (is_setup_core) {
     // Read memory layout from scratch2 (L3)
     memcpy(&l3l, (void *)soc_scratch[2], sizeof(struct l3_layout));
     dma = (uint32_t *)soc_scratch[3];
@@ -137,15 +135,13 @@ int main(void) {
 
   snrt_cluster_hw_barrier();
 
-  if (!snrt_is_dm_core()) {
+  if (is_compute_core) {
     while (1) {
       if (h2a_has_request(dma)) {
-        a2h_handle_request(core_idx);
+        a2h_handle_request();
       }
     }
-  }
-
-  if (snrt_is_dm_core()) {
+  } else {
     while (1) {}
   }
 

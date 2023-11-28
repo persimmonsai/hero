@@ -2,29 +2,37 @@
 
 #include "accel_if.h"
 
-int h2a_has_request (void *_payload) {
-    meta_t * meta = (meta_t *)_payload;
+#define PER_CORE_MEM_OFFSET 0x100000
+#define CORE_MEM_OFFSET(idx) ((idx) * PER_CORE_MEM_OFFSET)
+
+
+static inline void * get_core_mem (void *_shared_mem) {
+    uint32_t core_idx = snrt_global_core_idx();
+
+    uint8_t * shared_mem = (uint8_t *)_shared_mem;
+
+    return shared_mem + CORE_MEM_OFFSET(core_idx);
+}
+
+int h2a_has_request (void *shared_mem) {
+    meta_t * meta = (meta_t *)get_core_mem(shared_mem);
     return meta[1] != 0;
 }
 
-int h2a_get_data (void *_payload, SnitchAccelData_t *data) {
-    unsigned core_num = snrt_global_core_num();
-    meta_t * meta = (meta_t *)_payload;
+void h2a_get_data (void *shared_mem, SnitchCoreData_t *core_data) {
+    meta_t * meta = (meta_t *)get_core_mem(shared_mem);
     float * payload = (float *)(meta + META_SIZE);
 
     uint32_t total_size = meta[0];
     uint32_t payload_size = (total_size - META_SIZE_BYTES) / sizeof(float);
 
-    data->coreData[0].op = meta[1];
-    data->coreData[0].data = payload;
-    data->coreData[0].size = payload_size;
-    data->coreData[0].is_valid = 1;
-
-    return 0;
+    core_data->op = meta[1];
+    core_data->data = payload;
+    core_data->size = payload_size;
 }
 
-int h2a_put_data_vector (void *_payload, uint32_t *data, unsigned size) {
-    meta_t * meta = (meta_t *)_payload;
+int h2a_put_data (void *shared_mem, uint32_t *data, unsigned size) {
+    meta_t * meta = (meta_t *)get_core_mem(shared_mem);
     uint32_t * dst = meta + META_SIZE;
     meta[0] = META_SIZE_BYTES + sizeof(uint32_t) * size;
     meta[2] = size;
@@ -46,15 +54,6 @@ float task_fp32_mul_fact (float *data, unsigned size) {
     return result;
 }
 
-double task_fp64_mul_fact (double *data, unsigned size) {
-    double result = data[0];
-    for (unsigned i = 1; i < size; i++) {
-        result = result * data[i];
-    }
-    return result;
-}
-
-
 float task_fp32_max (float *data, uint32_t len) {
   float m = -INFINITY;
   for (size_t i = 0; i < len; i++) {
@@ -63,6 +62,14 @@ float task_fp32_max (float *data, uint32_t len) {
     }
   }
   return m;
+}
+
+float task_fp32_div (float *data, uint32_t len) {
+  float result = data[0];
+  for (size_t i = 1; i < len; i++) {
+    result /= data[i];
+  }
+  return result;
 }
 
 void task_expf (float *input, size_t input_len) {
