@@ -31,7 +31,7 @@ static void print_f32_result (int *lock, float *result) {
   snrt_mutex_release(lock);
 }
 
-static void a2h_handle_request (void) {
+static int a2h_handle_request (void) {
 
   unsigned core_idx = snrt_global_core_idx();
   SnitchCoreData_t core_data = {0};
@@ -80,14 +80,13 @@ static void a2h_handle_request (void) {
       break;
     }
     default: {
-      snrt_cluster_hw_barrier();
-      syscall(SYS_exit, 0, 0, 0, 0, 0);
-      while (1) {}
+      return 1;
     }
   }
   snrt_mutex_lock(&print_lock);
   printf("[TASK] (core idx %u) DONE!\n", core_idx);
   snrt_mutex_release(&print_lock);
+  return 0;
 }
 
 /***********************************************************************************
@@ -103,7 +102,6 @@ int main(void) {
   unsigned cluster_idx = snrt_cluster_idx();
   unsigned core_idx = snrt_global_core_idx();
   unsigned core_num = snrt_global_core_num();
-  unsigned is_compute_core = core_idx != 0;
   unsigned is_setup_core = core_idx == 0;
 
   // First core sets up the mailboxes and stuff
@@ -135,15 +133,14 @@ int main(void) {
 
   snrt_cluster_hw_barrier();
 
-  if (is_compute_core) {
-    while (1) {
-      if (h2a_has_request(dma)) {
-        a2h_handle_request();
-      }
+  int do_exit = 0;
+  while (!do_exit) {
+    if (h2a_has_request(dma)) {
+      do_exit = a2h_handle_request();
     }
-  } else {
-    while (1) {}
   }
 
+  snrt_cluster_hw_barrier();
+  syscall(SYS_exit, 0, 0, 0, 0, 0);
   return 0;
 }
