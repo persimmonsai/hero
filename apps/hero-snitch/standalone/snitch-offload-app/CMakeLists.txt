@@ -45,7 +45,7 @@ set(sn_common_include
 
 # Create project
 project(snitch_cluster LANGUAGES C ASM)
-add_compile_options(-g -O3)
+add_compile_options(-g -O3 -march=rv32imaf_xdma1_xssr1 -mabi=ilp32)
 
 # Pull snRuntime
 include(SnitchUtilities)
@@ -56,7 +56,7 @@ add_subdirectory(${SNITCH_SOFTWARE_DIR}/snBLAS snBLAS)
 include_directories(${SNRUNTIME_INCLUDE_DIRS} ${sn_common_include})
 include_directories(${SNBLAS_INCLUDE_DIRS})
 
-add_compile_options(-g -O3)
+add_compile_options(-g -O3 -march=rv32imaf_xdma1_xssr1 -mabi=ilp32)
 add_definitions(-DSNITCH_HERO)
 
 ################################################################################

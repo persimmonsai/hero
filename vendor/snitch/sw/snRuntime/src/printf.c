@@ -15,5 +15,7 @@ void snrt_putchar(char character);
 #define PRINTF_DISABLE_SUPPORT_FLOAT
 #endif
 
+#define PRINTF_DISABLE_SUPPORT_FLOAT
+
 // Include the vendorized tiny printf implementation.
 #include "../vendor/printf.c"

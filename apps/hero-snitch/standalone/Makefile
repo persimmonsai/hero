@@ -1,4 +1,5 @@
 
+CMAKE ?= /usr/bin/cmake
 
 all: snitch-app/hello_world.bin cva6-app/bringup
 
@@ -8,7 +9,7 @@ snitch-app/hello_world.bin:
 
 snitch-offload-app/snitch.bin:
 	mkdir -p snitch-offload-app/build
-	cd snitch-offload-app/build && cmake .. && make
+	cd snitch-offload-app/build && $(CMAKE) .. && make
 
 cva6-app/bringup:
 	make -C cva6-app

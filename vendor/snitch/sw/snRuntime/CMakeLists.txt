@@ -12,7 +12,7 @@ if (CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     include(SnitchUtilities)
     # Create snRuntime project
     project(snRuntime LANGUAGES C ASM)
-    add_compile_options(-O3 -g -ffunction-sections)
+    add_compile_options(-O3 -g -ffunction-sections -march=rv32imaf_xdma1_xssr1 -mabi=ilp32)
 else()
     # Export package information to includer.
     set(SNRUNTIME_DIR ${CMAKE_CURRENT_BINARY_DIR} PARENT_SCOPE)
