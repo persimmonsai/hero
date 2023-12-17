@@ -122,22 +122,6 @@ static int a2h_handle_request (void) {
       }
 
       uint32_t * a_ptr = core_data.data;
-      uint32_t * b_ptr = core_data.data;
-
-      printf("Matrix A:\n");
-      mat_print_u32(a_ptr, core_data.w, core_data.h);
-
-      uint32_t * c_ptr = task_mat_mul(&sa_prop, a_ptr, b_ptr);
-
-      h2a_put_data_2d(dma, c_ptr, sa_prop.width, sa_prop.height);
-      break;
-    }
-    case 0x31: {
-      if (check_mat_prop(&core_data, &sa_prop)) {
-        break;
-      }
-
-      uint32_t * a_ptr = core_data.data;
       uint32_t * b_ptr = a_ptr + (core_data.w * core_data.h);
 
       printf("Matrix A:\n");
