@@ -67,6 +67,10 @@ add_definitions(-DSNITCH_HERO)
 # Applications
 ################################################################################
 
+set (sn_accel_src
+  hier_wake.c accel_if.c sa.c
+)
+
 # Target applications
-add_snitch_executable(snitch ${sn_common_src} hier_wake.c accel_if.c snitch.c)
+add_snitch_executable(snitch ${sn_common_src} ${sn_accel_src} snitch.c)
 

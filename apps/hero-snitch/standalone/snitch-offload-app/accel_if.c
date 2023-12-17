@@ -1,6 +1,10 @@
 #include "math.h"
 
+#include "printf.h"
+#include "snrt.h"
+
 #include "accel_if.h"
+#include "sa.h"
 
 #define PER_CORE_MEM_OFFSET 0x100000
 #define CORE_MEM_OFFSET(idx) ((idx) * PER_CORE_MEM_OFFSET)
@@ -29,14 +33,18 @@ void h2a_get_data (void *shared_mem, SnitchCoreData_t *core_data) {
     core_data->op = meta[1];
     core_data->data = payload;
     core_data->size = payload_size;
+    core_data->w = meta[2];
+    core_data->h = meta[3];
+    core_data->dtype = meta[4];
 }
 
-int h2a_put_data (void *shared_mem, uint32_t *data, unsigned size) {
+int h2a_put_data_2d (void *shared_mem, const uint32_t *data, unsigned w, unsigned h) {
     meta_t * meta = (meta_t *)get_core_mem(shared_mem);
     uint32_t * dst = meta + META_SIZE;
+    uint32_t size = w * h;
     meta[0] = META_SIZE_BYTES + sizeof(uint32_t) * size;
-    meta[2] = size;
-    meta[3] = 1;
+    meta[2] = w;
+    meta[3] = h;
 
     for (unsigned i = 0; i < size; i++) {
         dst[i] = data[i];
@@ -44,6 +52,15 @@ int h2a_put_data (void *shared_mem, uint32_t *data, unsigned size) {
     //Note: this operation must be the last as it acts as a signal to the host application
     meta[1] = 0;
     return 0;
+}
+
+int h2a_put_data (void *shared_mem, const uint32_t *data, unsigned size) {
+    return h2a_put_data_2d(shared_mem, data, size, 1);
+}
+
+int h2a_put_dummy_data(void *shared_mem) {
+  float dummy = 0.0f;
+  h2a_put_data_2d(shared_mem, &dummy, 1, 0);
 }
 
 float task_fp32_mul_fact (float *data, unsigned size) {
@@ -101,4 +118,34 @@ void task_softmax(float *input, size_t input_len) {
   for (size_t i = 0; i < input_len; i++) {
     input[i] = expf(input[i] - offset);
   }
+}
+
+static void copy_u32 (uint32_t * dst, uint32_t *src, uint32_t size) {
+  for (uint32_t i = 0; i < size; i++) {
+    dst[i] = src[i];
+  }
+}
+
+static void mat_rotate_cw_u32 (uint32_t *dst, uint32_t *src, uint32_t w, uint32_t h) {
+  for (uint32_t i = 0; i < w; i++) {
+    for (uint32_t j = 0; j < h; j++) {
+      dst[(i * h) + j] = src[(j * w) + i];
+    }
+  }
+}
+
+void * task_mat_mul (sa_prop_t *sa_prop, void * a, void * b) {
+  uint32_t * tcdm_ptr = (uint32_t *)0x10000000;
+
+  uint32_t mat_size = sa_prop->width * sa_prop->height;
+  uint32_t * a_ptr = tcdm_ptr;
+  uint32_t * b_ptr = a_ptr + mat_size;
+  uint32_t * c_ptr = tcdm_ptr;
+
+  copy_u32(a_ptr, a, mat_size);
+  mat_rotate_cw_u32(b_ptr, b, sa_prop->width, sa_prop->height);
+
+  exec_sa(sa_prop, a_ptr, b_ptr, c_ptr);
+
+  return c_ptr;
 }
