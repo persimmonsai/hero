@@ -13,6 +13,7 @@
 #define SA_VERSION_REG_OFF  (5 * 8)
 #define SA_PROP1_REG_OFF    (6 * 8)
 #define SA_PROP2_REG_OFF    (7 * 8)
+#define SA_PROP3_REG_OFF    (8 * 8)
 
 #define SA_MAC_DONE_BP (0)
 #define SA_RI_DONE_BP (1)
@@ -79,7 +80,7 @@ void exec_sa (sa_prop_t * prop, void * a, void * b, void * c) {
     sa_wait_status(sa_base_addr, 1 << SA_RI_DONE_BP);
     sa_wait_status(sa_base_addr, 1 << SA_MAC_DONE_BP);
 
-    sa_wait_cycles(prop->width + prop->height);
+    sa_wait_cycles(4 * (prop->width + prop->height));
 
     //Read out
     sa_write_ctrl(sa_base_addr, (1 << 31) | 1);
@@ -97,6 +98,11 @@ void discover_sa (sa_prop_t * prop) {
 
     prop->mac_type = reg & 0x1;
     prop->version = sa_read_reg(sa_base_addr + SA_VERSION_REG_OFF);
+
+    reg = sa_read_reg(sa_base_addr + SA_PROP3_REG_OFF);
+
+    prop->out_width = (reg >> 16) & 0xffff;
+    prop->in_width = (reg) & 0xffff;
 
     prop->base_addr = sa_base_addr;
 }

@@ -37,11 +37,40 @@ static void mat_print_u32 (uint32_t * src, uint32_t w, uint32_t h) {
   for (uint32_t i = 0; i < w; i++) {
     for (uint32_t j = 0; j < h; j++) {
       uint32_t ij = src[(i * h) + j];
-      printf("%d, ", ij);
+      printf("%x, ", ij);
     }
     printf("\n");
   }
   printf("]\n\n");
+}
+
+static void mat_print_u16 (uint16_t * src, uint32_t w, uint32_t h) {
+  printf("[\n");
+  for (uint32_t i = 0; i < w; i++) {
+    for (uint32_t j = 0; j < h; j++) {
+      uint32_t ij = src[(i * h) + j];
+      printf("%x, ", ij);
+    }
+    printf("\n");
+  }
+  printf("]\n\n");
+}
+
+static void mat_to_bfloat16 (uint16_t * dst, uint32_t * src, uint32_t w, uint32_t h) {
+  uint32_t size = w * h;
+
+  for (uint32_t i = 0; i < size; i++) {
+    //Cut the lower half
+    dst[i] = (src[i] >> 16) & 0xffff;
+  }
+}
+
+static void mat_from_bfloat16 (uint32_t * dst, uint16_t * src, uint32_t w, uint32_t h) {
+  uint32_t size = w * h;
+
+  for (uint32_t i = 0; i < size; i++) {
+    dst[i] = (src[i] << 16);
+  }
 }
 
 static int check_mat_prop (SnitchCoreData_t * core_data, sa_prop_t * sa_prop) {
@@ -68,6 +97,28 @@ static int check_mat_prop (SnitchCoreData_t * core_data, sa_prop_t * sa_prop) {
   return 0;
 }
 
+const uint16_t m_a_ex[] = {
+0, 0, 0, 0, 0, 0, 0, 0,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+};
+
+const uint16_t m_b_ex[] = {
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
+};
+
 static int a2h_handle_request (void) {
 
   unsigned core_idx = snrt_global_core_idx();
@@ -75,7 +126,7 @@ static int a2h_handle_request (void) {
   h2a_get_data(dma, &core_data);
 
   snrt_mutex_lock(&print_lock);
-  printf("[TASK] (core idx %u) a2h request received:  %d\n", core_idx, snrt_is_dm_core());
+  printf("[TASK] (core idx %u) a2h request received:  %d\n", core_idx, core_data.op);
   //uint32_t *data = (uint32_t *)core_data.data;
   //for (unsigned i = 0 ;  i < core_data.size; i++) {
   //  printf("0x%x\n", data[i]);
@@ -123,16 +174,61 @@ static int a2h_handle_request (void) {
 
       uint32_t * a_ptr = core_data.data;
       uint32_t * b_ptr = a_ptr + (core_data.w * core_data.h);
-
-      printf("Matrix A:\n");
-      mat_print_u32(a_ptr, core_data.w, core_data.h);
-      printf("Matrix B:\n");
-      mat_print_u32(b_ptr, core_data.w, core_data.h);
-
       uint32_t * c_ptr = task_mat_mul(&sa_prop, a_ptr, b_ptr);
 
-      h2a_put_data_2d(dma, c_ptr, sa_prop.width, sa_prop.height);
+      printf("A:\n");
+      mat_print_u32(a_ptr, core_data.w, core_data.h);
+      printf("B:\n");
+      mat_print_u32(b_ptr, core_data.w, core_data.h);
 
+      h2a_put_data_2d(dma, c_ptr, core_data.w * core_data.h * sizeof(uint32_t), sa_prop.width, sa_prop.height);
+
+      break;
+    }
+    //bfloat16
+    case 0x31: {
+      if (check_mat_prop(&core_data, &sa_prop)) {
+        break;
+      }
+
+      const uint32_t * a_ptr = core_data.data;
+      const uint32_t * b_ptr = a_ptr + (core_data.w * core_data.h);
+
+      mat_to_bfloat16(a_ptr, a_ptr, core_data.w, core_data.h);
+      mat_to_bfloat16(b_ptr, b_ptr, core_data.w, core_data.h);
+
+      printf("input A 16\n");
+      mat_print_u16(a_ptr, core_data.w, core_data.h);
+
+      printf("input B 16\n");
+      mat_print_u16(b_ptr, core_data.w, core_data.h);
+
+      uint32_t * c_ptr = task_mat_mul16(&sa_prop, a_ptr, b_ptr);
+
+      //printf("output A 32\n");
+      //mat_print_u32(c_ptr, core_data.w, core_data.h);
+
+      h2a_put_data_2d(dma, c_ptr, core_data.w * core_data.h * sizeof(uint32_t), sa_prop.width, sa_prop.height);
+
+      break;
+    }
+    case 0x32: {
+      const uint32_t * a_ptr = m_a_ex;
+      const uint32_t * b_ptr = m_a_ex;
+
+      uint32_t * c_ptr = task_mat_mul16(&sa_prop, a_ptr, b_ptr);
+
+      h2a_put_data_2d(dma, c_ptr, sa_prop.width * sa_prop.height * sizeof(uint32_t), sa_prop.width, sa_prop.height);
+      break;
+    }
+    case 0x40: {
+      uint32_t data[4];
+      data[0] = sa_prop.version;
+      data[1] = sa_prop.mac_type;
+      data[2] = (sa_prop.width << 16) | sa_prop.height;
+      data[3] = (sa_prop.out_width << 16) | sa_prop.in_width;
+
+      h2a_put_data(dma, data, 4);
       break;
     }
     case 0x100: {
@@ -185,8 +281,8 @@ int main(void) {
     printf("(cluster %u, idx %u/%u, is_dma = %i) Finished setting up mailboxes\n", cluster_idx,
             core_idx, core_num - 1, snrt_is_dm_core());
     printf("Coherent memory phys addr = 0x%p\n", dma);
-    printf("[SA]: version = 0x%x, w = %d, h = %d, mac_type = %d\n",
-          sa_prop.version, sa_prop.width, sa_prop.height, sa_prop.mac_type);
+    printf("[SA]: version = 0x%x, w = %d, h = %d, mac_type = %d, in width = %d, out width = %d\n",
+          sa_prop.version, sa_prop.width, sa_prop.height, sa_prop.mac_type, sa_prop.in_width, sa_prop.out_width);
 
     snrt_mutex_release(&print_lock);
   }

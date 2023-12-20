@@ -38,29 +38,26 @@ void h2a_get_data (void *shared_mem, SnitchCoreData_t *core_data) {
     core_data->dtype = meta[4];
 }
 
-int h2a_put_data_2d (void *shared_mem, const uint32_t *data, unsigned w, unsigned h) {
+int h2a_put_data_2d (void *shared_mem, const uint32_t *data, unsigned size_bytes, unsigned w, unsigned h) {
     meta_t * meta = (meta_t *)get_core_mem(shared_mem);
     uint32_t * dst = meta + META_SIZE;
-    uint32_t size = w * h;
-    meta[0] = META_SIZE_BYTES + sizeof(uint32_t) * size;
+    meta[0] = META_SIZE_BYTES + size_bytes;
     meta[2] = w;
     meta[3] = h;
 
-    for (unsigned i = 0; i < size; i++) {
-        dst[i] = data[i];
-    }
+    memcpy(dst, data, size_bytes);
     //Note: this operation must be the last as it acts as a signal to the host application
     meta[1] = 0;
     return 0;
 }
 
 int h2a_put_data (void *shared_mem, const uint32_t *data, unsigned size) {
-    return h2a_put_data_2d(shared_mem, data, size, 1);
+    return h2a_put_data_2d(shared_mem, data, size * sizeof(uint32_t), size, 1);
 }
 
 int h2a_put_dummy_data(void *shared_mem) {
   float dummy = 0.0f;
-  h2a_put_data_2d(shared_mem, &dummy, 1, 0);
+  h2a_put_data_2d(shared_mem, &dummy, sizeof(float), 1, 0);
 }
 
 float task_fp32_mul_fact (float *data, unsigned size) {
@@ -120,21 +117,25 @@ void task_softmax(float *input, size_t input_len) {
   }
 }
 
-static void copy_u32 (uint32_t * dst, uint32_t *src, uint32_t size) {
+static void copy_u32 (uint32_t * dst, const uint32_t *src, uint32_t size) {
   for (uint32_t i = 0; i < size; i++) {
     dst[i] = src[i];
   }
 }
 
-static void mat_rotate_cw_u32 (uint32_t *dst, uint32_t *src, uint32_t w, uint32_t h) {
-  for (uint32_t i = 0; i < w; i++) {
-    for (uint32_t j = 0; j < h; j++) {
-      dst[(i * h) + j] = src[(j * w) + i];
-    }
+static void copy_u16 (uint16_t * dst, const uint16_t *src, uint32_t size) {
+  for (uint32_t i = 0; i < size; i++) {
+    dst[i] = src[i];
   }
 }
 
-void * task_mat_mul (sa_prop_t *sa_prop, void * a, void * b) {
+static void memset_u16 (uint16_t * dst, uint32_t size, uint16_t val) {
+  for (uint32_t i = 0; i < size; i++) {
+    dst[i] = val;
+  }
+}
+
+void * task_mat_mul (sa_prop_t *sa_prop, const void * a, const void * b) {
   uint32_t * tcdm_ptr = (uint32_t *)0x10000000;
 
   uint32_t mat_size = sa_prop->width * sa_prop->height;
@@ -143,7 +144,25 @@ void * task_mat_mul (sa_prop_t *sa_prop, void * a, void * b) {
   uint32_t * c_ptr = tcdm_ptr;
 
   copy_u32(a_ptr, a, mat_size);
-  mat_rotate_cw_u32(b_ptr, b, sa_prop->width, sa_prop->height);
+  copy_u32(b_ptr, b, mat_size);
+
+  exec_sa(sa_prop, b_ptr, a_ptr, c_ptr);
+
+  return c_ptr;
+}
+
+void * task_mat_mul16 (sa_prop_t *sa_prop, const void * a, const void * b) {
+  uint16_t * tcdm_ptr = (uint16_t *)0x10000000;
+
+  memset_u16(tcdm_ptr, 1024 * 8, 0);
+
+  uint16_t mat_size = sa_prop->width * sa_prop->height;
+  uint16_t * a_ptr = tcdm_ptr;
+  uint16_t * b_ptr = a_ptr + mat_size;
+  uint16_t * c_ptr = b_ptr + mat_size;
+
+  copy_u16(a_ptr, a, mat_size);
+  copy_u16(b_ptr, b, mat_size);
 
   exec_sa(sa_prop, a_ptr, b_ptr, c_ptr);
 
