@@ -56,23 +56,6 @@ static void mat_print_u16 (uint16_t * src, uint32_t w, uint32_t h) {
   printf("]\n\n");
 }
 
-static void mat_to_bfloat16 (uint16_t * dst, uint32_t * src, uint32_t w, uint32_t h) {
-  uint32_t size = w * h;
-
-  for (uint32_t i = 0; i < size; i++) {
-    //Cut the lower half
-    dst[i] = (src[i] >> 16) & 0xffff;
-  }
-}
-
-static void mat_from_bfloat16 (uint32_t * dst, uint16_t * src, uint32_t w, uint32_t h) {
-  uint32_t size = w * h;
-
-  for (uint32_t i = 0; i < size; i++) {
-    dst[i] = (src[i] << 16);
-  }
-}
-
 static int check_mat_prop (SnitchCoreData_t * core_data, sa_prop_t * sa_prop) {
   snrt_mutex_lock(&print_lock);
   printf("[SA] data: w = %d, h = %d, dtype = %d\n", core_data->w, core_data->h, core_data->dtype);
@@ -85,39 +68,8 @@ static int check_mat_prop (SnitchCoreData_t * core_data, sa_prop_t * sa_prop) {
     h2a_put_dummy_data(dma);
     return 1;
   }
-#if 0
-  if (core_data.dtype != sa_prop.mac_type) {
-    snrt_mutex_lock(&print_lock);
-    printf("[SA] Data type doesn't match\n");
-    snrt_mutex_release(&print_lock);
-    h2a_put_dummy_data(dma);
-    break;
-  }
-#endif
   return 0;
 }
-
-const uint16_t m_a_ex[] = {
-0, 0, 0, 0, 0, 0, 0, 0,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-};
-
-const uint16_t m_b_ex[] = {
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-0x3f80, 0x4000, 0x4040, 0x4080, 0x40a0, 0x40c0, 0x40e0, 0x4100,
-};
 
 static int a2h_handle_request (void) {
 
@@ -172,30 +124,9 @@ static int a2h_handle_request (void) {
         break;
       }
 
-      uint32_t * a_ptr = core_data.data;
-      uint32_t * b_ptr = a_ptr + (core_data.w * core_data.h);
-      uint32_t * c_ptr = task_mat_mul(&sa_prop, a_ptr, b_ptr);
-
-      printf("A:\n");
-      mat_print_u32(a_ptr, core_data.w, core_data.h);
-      printf("B:\n");
-      mat_print_u32(b_ptr, core_data.w, core_data.h);
-
-      h2a_put_data_2d(dma, c_ptr, core_data.w * core_data.h * sizeof(uint32_t), sa_prop.width, sa_prop.height);
-
-      break;
-    }
-    //bfloat16
-    case 0x31: {
-      if (check_mat_prop(&core_data, &sa_prop)) {
-        break;
-      }
-
-      const uint32_t * a_ptr = core_data.data;
-      const uint32_t * b_ptr = a_ptr + (core_data.w * core_data.h);
-
-      mat_to_bfloat16(a_ptr, a_ptr, core_data.w, core_data.h);
-      mat_to_bfloat16(b_ptr, b_ptr, core_data.w, core_data.h);
+      uint32_t mat_size_bytes = core_data.w * core_data.h * (sa_prop.in_width / 8);
+      uint8_t * a_ptr = core_data.data;
+      uint8_t * b_ptr = a_ptr + mat_size_bytes;
 
       printf("input A 16\n");
       mat_print_u16(a_ptr, core_data.w, core_data.h);
@@ -203,22 +134,10 @@ static int a2h_handle_request (void) {
       printf("input B 16\n");
       mat_print_u16(b_ptr, core_data.w, core_data.h);
 
-      uint32_t * c_ptr = task_mat_mul16(&sa_prop, a_ptr, b_ptr);
+      void * c_ptr = task_mat_mul(&sa_prop, a_ptr, b_ptr);
 
-      //printf("output A 32\n");
-      //mat_print_u32(c_ptr, core_data.w, core_data.h);
+      h2a_put_data_2d(dma, c_ptr, sizeof(uint32_t), sa_prop.width, sa_prop.height);
 
-      h2a_put_data_2d(dma, c_ptr, core_data.w * core_data.h * sizeof(uint32_t), sa_prop.width, sa_prop.height);
-
-      break;
-    }
-    case 0x32: {
-      const uint32_t * a_ptr = m_a_ex;
-      const uint32_t * b_ptr = m_a_ex;
-
-      uint32_t * c_ptr = task_mat_mul16(&sa_prop, a_ptr, b_ptr);
-
-      h2a_put_data_2d(dma, c_ptr, sa_prop.width * sa_prop.height * sizeof(uint32_t), sa_prop.width, sa_prop.height);
       break;
     }
     case 0x40: {

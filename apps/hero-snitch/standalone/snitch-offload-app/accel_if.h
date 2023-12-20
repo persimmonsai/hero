@@ -33,7 +33,7 @@ typedef struct {
 int h2a_has_request (void *shared_mem);
 void h2a_get_data (void *shared_mem, SnitchCoreData_t *data);
 int h2a_put_data (void *shared_mem, const uint32_t * data, unsigned size);
-int h2a_put_data_2d (void *shared_mem, const uint32_t *data, unsigned size_bytes, unsigned w, unsigned h);
+int h2a_put_data_2d (void *shared_mem, const uint32_t *data, unsigned item_size_bytes, unsigned w, unsigned h);
 int h2a_put_dummy_data(void *shared_mem);
 
 float task_fp32_mul_fact (float *data, unsigned size);
@@ -45,6 +45,5 @@ void task_logf (float *input, size_t input_len);
 void task_softmax(float *input, size_t input_len);
 
 void * task_mat_mul (sa_prop_t *sa_prop, const void * a, const void * b);
-void * task_mat_mul16 (sa_prop_t *sa_prop, const void * a, const void * b);
 
 #endif /*SNITCH_ACCEL_H*/
