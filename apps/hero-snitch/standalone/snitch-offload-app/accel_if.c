@@ -1,7 +1,9 @@
 #include "math.h"
+#include "string.h"
 
-#include "printf.h"
+#include "snitch_config.h"
 #include "snrt.h"
+#include "printf.h"
 
 #include "accel_if.h"
 #include "sa.h"
@@ -25,40 +27,30 @@ int h2a_has_request (void *shared_mem) {
 
 void h2a_get_data (void *shared_mem, SnitchCoreData_t *core_data) {
     meta_t * meta = (meta_t *)get_core_mem(shared_mem);
-    float * payload = (float *)(meta + META_SIZE);
+    uint32_t * payload = (uint32_t *)(meta + META_SIZE);
 
     uint32_t total_size = meta[0];
-    uint32_t payload_size = (total_size - META_SIZE_BYTES) / sizeof(float);
+    uint32_t payload_size = (total_size - META_SIZE_BYTES) / sizeof(uint32_t);
 
     core_data->op = meta[1];
     core_data->data = payload;
     core_data->size = payload_size;
-    core_data->w = meta[2];
-    core_data->h = meta[3];
-    core_data->dtype = meta[4];
 }
 
-int h2a_put_data_2d (void *shared_mem, const uint32_t *data, unsigned item_size_bytes, unsigned w, unsigned h) {
+int h2a_put_data (void *shared_mem, const uint32_t *data, const size_t size_bytes) {
     meta_t * meta = (meta_t *)get_core_mem(shared_mem);
     uint32_t * dst = meta + META_SIZE;
-    uint32_t data_size_bytes = (w * h) * item_size_bytes;
-    meta[0] = META_SIZE_BYTES + data_size_bytes;
-    meta[2] = w;
-    meta[3] = h;
+    meta[0] = META_SIZE_BYTES + size_bytes;
 
-    memcpy(dst, data, data_size_bytes);
+    memcpy(dst, data, size_bytes);
     //Note: this operation must be the last as it acts as a signal to the host application
     meta[1] = 0;
     return 0;
 }
 
-int h2a_put_data (void *shared_mem, const uint32_t *data, unsigned size) {
-    return h2a_put_data_2d(shared_mem, data, sizeof(uint32_t), size, 1);
-}
-
 int h2a_put_dummy_data(void *shared_mem) {
-  float dummy = 0.0f;
-  h2a_put_data_2d(shared_mem, &dummy, sizeof(float), 1, 1);
+  uint32_t dummy = 0;
+  return h2a_put_data(shared_mem, &dummy, sizeof(uint32_t));
 }
 
 float task_fp32_mul_fact (float *data, unsigned size) {
@@ -118,18 +110,97 @@ void task_softmax(float *input, size_t input_len) {
   }
 }
 
-void * task_mat_mul (sa_prop_t *sa_prop, const void * a, const void * b) {
-  void * tcdm_ptr = (void *)0x10000000;
+static void mat_print_u16 (uint16_t * src, uint32_t size) {
+  printf("[\n");
+  for (uint32_t j = 0; j < size; j++) {
+    uint32_t ij = src[j];
+    printf("%x, ", ij);
+  }
+  printf("]\n\n");
+}
 
-  uint32_t mat_size_bytes = sa_prop->width * sa_prop->height * (sa_prop->in_width / 8);
-  uint8_t * a_ptr = tcdm_ptr;
-  uint8_t * b_ptr = a_ptr + mat_size_bytes;
-  uint8_t * c_ptr = b_ptr + mat_size_bytes;
+static uint32_t sa_data_cnt = 0;
 
-  memcpy(a_ptr, a, mat_size_bytes);
-  memcpy(b_ptr, b, mat_size_bytes);
+void * task_mat_mul (sa_prop_t *sa_prop, SnitchCoreData_t *core_data) {
 
-  exec_sa(sa_prop, a_ptr, b_ptr, c_ptr);
+  unsigned core_idx = snrt_global_core_idx();
+  uint64_t *cmdq_ptr = NULL;
+  uint32_t inw_bytes = sa_prop->in_width/8;
 
-  return c_ptr;
+  if (core_idx == 0) {
+    mat_t ab[16] = {{0}};
+    uint32_t batch_cnt = 0;
+
+    uint32_t *ptr = core_data->data;
+    for (uint32_t i = 0; i < 16; i++) {
+      uint32_t data_size = ptr[2];
+      printf("task_mat_mul: ptr = %p, data_size = %d\n", ptr, data_size);
+
+      if (ptr[2] == 0) {
+        break;
+      }
+
+      ab[i].data = &ptr[3];
+      ab[i].size_bytes = ptr[2];
+
+      if ((ptr[2] % sizeof(uint32_t)) != 0) {
+        printf("task_mat_mul: Size is not aligned !\n");
+        return NULL;
+      }
+
+      ptr += (ptr[2] / sizeof(uint32_t)) + 3;
+      batch_cnt++;
+    }
+
+    batch_cnt /= 2;
+
+    void * tcdm_ptr = (void *)TCDM_BASE_ADDR;
+    uint8_t * tcdm_data_ptr = (uint8_t *)TCDM_BASE_ADDR + 0x1000;
+    cmdq_ptr = (uint64_t *)tcdm_ptr;
+
+    uint32_t c_size = sa_prop->width * sa_prop->height;
+
+    sa_write_ctrl(0);
+
+    sa_config(cmdq_ptr);
+
+    printf("task_mat_mul: setting cmdq\n");
+
+    for (uint32_t i = 0; i < batch_cnt; i++) {
+      uint8_t *a_ptr = tcdm_data_ptr;
+      uint8_t *b_ptr = a_ptr + ab[i/2].size_bytes;
+
+      uint32_t a_size = ab[i/2].size_bytes;
+      uint32_t b_size = ab[i/2 + 1].size_bytes;
+
+      if (0) {
+        a_ptr = ab[i/2].data;
+        b_ptr = ab[i/2 + 1].data;
+      } else {
+        memcpy(a_ptr, ab[i/2].data, a_size);
+        memcpy(b_ptr, ab[i/2 + 1].data, b_size);
+      }
+
+      //mat_print_u16(a_ptr, a_size / inw_bytes);
+      //mat_print_u16(b_ptr, b_size / inw_bytes);
+
+      cmdq_ptr = sa_addq(cmdq_ptr,
+                          a_ptr,
+                          b_ptr,
+                          a_size,
+                          b_size,
+                          i == batch_cnt-1, i);
+
+      tcdm_data_ptr = b_ptr + b_size;
+      sa_data_cnt += c_size;
+    }
+
+    sa_write_ctrl(1);
+  }
+
+  snrt_cluster_hw_barrier();
+  sa_memread(sa_prop, cmdq_ptr, &sa_data_cnt);
+  snrt_cluster_hw_barrier();
+
+  return cmdq_ptr;
 }

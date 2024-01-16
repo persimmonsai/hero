@@ -17,7 +17,7 @@ static volatile uint32_t *soc_scratch = soc_scratch0;
 extern volatile struct ring_buf *g_a2h_rb;
 extern volatile struct ring_buf *g_a2h_mbox;
 extern volatile struct ring_buf *g_h2a_mbox;
-static volatile int32_t print_lock = 0;
+static volatile uint32_t print_lock = 0;
 static volatile uint8_t *l3;
 static volatile uint32_t *dma = NULL;
 static volatile sa_prop_t sa_prop;
@@ -54,21 +54,6 @@ static void mat_print_u16 (uint16_t * src, uint32_t w, uint32_t h) {
     printf("\n");
   }
   printf("]\n\n");
-}
-
-static int check_mat_prop (SnitchCoreData_t * core_data, sa_prop_t * sa_prop) {
-  snrt_mutex_lock(&print_lock);
-  printf("[SA] data: w = %d, h = %d, dtype = %d\n", core_data->w, core_data->h, core_data->dtype);
-  snrt_mutex_release(&print_lock);
-
-  if ((core_data->w != sa_prop->width) || (core_data->h != sa_prop->height)) {
-    snrt_mutex_lock(&print_lock);
-    printf("[SA] Dimension doesn't match\n");
-    snrt_mutex_release(&print_lock);
-    h2a_put_dummy_data(dma);
-    return 1;
-  }
-  return 0;
 }
 
 static int a2h_handle_request (void) {
@@ -120,24 +105,16 @@ static int a2h_handle_request (void) {
       break;
     }
     case 0x30: {
-      if (check_mat_prop(&core_data, &sa_prop)) {
-        break;
+
+      void * c_ptr = task_mat_mul(&sa_prop, &core_data);
+
+      if (0 == core_idx) {
+        if (NULL == c_ptr) {
+          printf("task_mat_mul: Failed\n");
+          h2a_put_dummy_data(dma);
+        }
+        h2a_put_data(dma, c_ptr, sizeof(uint32_t) * sa_prop.width * sa_prop.height);
       }
-
-      uint32_t mat_size_bytes = core_data.w * core_data.h * (sa_prop.in_width / 8);
-      uint8_t * a_ptr = core_data.data;
-      uint8_t * b_ptr = a_ptr + mat_size_bytes;
-
-      printf("input A 16\n");
-      mat_print_u16(a_ptr, core_data.w, core_data.h);
-
-      printf("input B 16\n");
-      mat_print_u16(b_ptr, core_data.w, core_data.h);
-
-      void * c_ptr = task_mat_mul(&sa_prop, a_ptr, b_ptr);
-
-      h2a_put_data_2d(dma, c_ptr, sizeof(uint32_t), sa_prop.width, sa_prop.height);
-
       break;
     }
     case 0x40: {
@@ -147,7 +124,7 @@ static int a2h_handle_request (void) {
       data[2] = (sa_prop.width << 16) | sa_prop.height;
       data[3] = (sa_prop.out_width << 16) | sa_prop.in_width;
 
-      h2a_put_data(dma, data, 4);
+      h2a_put_data(dma, data, 4 * sizeof(uint32_t));
       break;
     }
     case 0x100: {
@@ -159,9 +136,12 @@ static int a2h_handle_request (void) {
       return 1;
     }
   }
-  snrt_mutex_lock(&print_lock);
-  printf("[TASK] (core idx %u) DONE!\n", core_idx);
-  snrt_mutex_release(&print_lock);
+  snrt_cluster_hw_barrier();
+  if (0 == core_idx) {
+    snrt_mutex_lock(&print_lock);
+    printf("[TASK] (core idx %u) DONE!\n", core_idx);
+    snrt_mutex_release(&print_lock);
+  }
   return 0;
 }
 
@@ -195,13 +175,14 @@ int main(void) {
     l3 = (uint8_t *)l3l.heap;
     // Setup print lock
 
-    discover_sa(&sa_prop);
+    sa_discover(&sa_prop);
 
     printf("(cluster %u, idx %u/%u, is_dma = %i) Finished setting up mailboxes\n", cluster_idx,
             core_idx, core_num - 1, snrt_is_dm_core());
     printf("Coherent memory phys addr = 0x%p\n", dma);
-    printf("[SA]: version = 0x%x, w = %d, h = %d, mac_type = %d, in width = %d, out width = %d\n",
-          sa_prop.version, sa_prop.width, sa_prop.height, sa_prop.mac_type, sa_prop.in_width, sa_prop.out_width);
+    printf("[SA]: version = 0x%x, w = %d, h = %d, mac_type = %d, in width = %d, out width = %d, num events: %d\n",
+          sa_prop.version, sa_prop.width, sa_prop.height, sa_prop.mac_type, sa_prop.in_width, sa_prop.out_width,
+          sa_prop.num_events);
 
     snrt_mutex_release(&print_lock);
   }

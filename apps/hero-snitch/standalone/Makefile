@@ -1,5 +1,8 @@
 
 CMAKE ?= /usr/bin/cmake
+SNITCH_CONFIG ?= ./single_cluster.hjson
+
+OFFLOAD_APP_DIR = snitch-offload-app
 
 all: snitch-app/hello_world.bin cva6-app/bringup
 
@@ -7,9 +10,11 @@ snitch-app/hello_world.bin:
 	mkdir -p snitch-app/build
 	cd snitch-app/build && cmake .. && make
 
-snitch-offload-app/snitch.bin:
-	mkdir -p snitch-offload-app/build
-	cd snitch-offload-app/build && $(CMAKE) .. && make
+$(OFFLOAD_APP_DIR)/snitch.bin:
+	./gen_snitch_config.py --cfg $(SNITCH_CONFIG)
+	mv snitch_config.h $(OFFLOAD_APP_DIR)/
+	mkdir -p $(OFFLOAD_APP_DIR)/build
+	cd $(OFFLOAD_APP_DIR)/build && $(CMAKE) .. && make
 
 cva6-app/bringup:
 	make -C cva6-app
@@ -22,9 +27,9 @@ deploy: snitch-app/hello_world.bin cva6-app/bringup
 zip: snitch.zip
 zip-offload: snitch-offload.zip
 
-snitch-offload.zip: snitch-offload-app/snitch.bin cva6-app/bringup
+snitch-offload.zip: $(OFFLOAD_APP_DIR)/snitch.bin cva6-app/bringup
 	mkdir -p deploy_standalone
-	cp run_offload.sh cva6-app/bringup cva6-app/file_to_offload.txt snitch-offload-app/build/snitch.bin deploy_standalone
+	cp run_offload.sh cva6-app/bringup cva6-app/file_to_offload.txt $(OFFLOAD_APP_DIR)/build/snitch.bin deploy_standalone
 
 	zip -r deploy_standalone/snitch.zip deploy_standalone/run_offload.sh deploy_standalone/bringup deploy_standalone/file_to_offload.txt deploy_standalone/snitch.bin
 
@@ -37,4 +42,4 @@ snitch.zip: snitch-app/hello_world.bin cva6-app/bringup
 
 clean:
 	make -C cva6-app clean
-	rm -rf snitch-app/build snitch-offload-app/build deploy_standalone
+	rm -rf snitch-app/build $(OFFLOAD_APP_DIR)/build deploy_standalone
