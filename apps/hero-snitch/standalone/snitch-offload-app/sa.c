@@ -39,19 +39,18 @@ void sa_config (void *cmdq_ofsfet) {
   sa_write_reg(SA_BASE_ADDR + SA_CMDQ_OFF_REG_OFF, (uint32_t)cmdq_ofsfet);
 }
 
-#define AddrBits 48UL
-#define AddrMask (((uint64_t)1 << AddrBits) - 1UL)
+#define AddrMask (((uint64_t)1 << CLUSTER_ADDR_WIDTH) - 1UL)
 
 uint64_t *sa_addq (
   uint64_t *qptr, const void *a_ptr, const void *b_ptr,
   uint32_t a_size, uint32_t b_size, uint32_t last, uint32_t id) {
 
-  printf("sa_addq: a_ptr = %p, b_ptr = %p, a_size=%d, b_size=%d, last=%d\n", a_ptr, b_ptr, a_size, b_size, last);
+  printf("sa_addq: a_ptr = %p, b_ptr = %p, a_size=%d, b_size=%d, id=%d, last=%d\n", a_ptr, b_ptr, a_size, b_size, id, last);
 
-  qptr[1] = ((uint64_t)a_ptr & AddrMask) | ((uint64_t)a_size << AddrBits);
-  qptr[2] = ((uint64_t)b_ptr & AddrMask) | ((uint64_t)b_size << AddrBits);
+  qptr[1] = ((uint64_t)a_ptr & AddrMask) | ((uint64_t)a_size << CLUSTER_ADDR_WIDTH);
+  qptr[2] = ((uint64_t)b_ptr & AddrMask) | ((uint64_t)b_size << CLUSTER_ADDR_WIDTH);
 
-  qptr[0] = ((uint64_t)(&qptr[3]) & AddrMask) | ((uint64_t)id << AddrBits) | ((uint64_t)last << 63);
+  qptr[0] = ((uint64_t)(&qptr[3]) & AddrMask) | ((uint64_t)id << CLUSTER_ADDR_WIDTH) | ((uint64_t)last << 63);
 
   return &qptr[3];
 }
@@ -103,9 +102,9 @@ void sa_memread (sa_prop_t *sa_prop, void *_dst, uint32_t *data_cnt) {
 
     printf("sa_memread: data_cnt = %d\n", *data_cnt);
 
-    _wait(256);
+    //_wait(256);
 
-    sa_read_events(sa_prop);
+    //sa_read_events(sa_prop);
 
     while (1) {
         if (0 == *data_cnt) {
@@ -133,4 +132,5 @@ void sa_memread (sa_prop_t *sa_prop, void *_dst, uint32_t *data_cnt) {
         (*data_cnt)--;
         snrt_mutex_release(&data_lock);
     }
+    sa_read_events(sa_prop);
 }

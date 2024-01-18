@@ -5,7 +5,7 @@ import hjson
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser("")
-    parser.add_argument('--cfg', help='Provide config.hjson to generate proper test data', type=str, required=True)
+    parser.add_argument('--cfg', help='Provide config.hjson to generate proper config data', type=str, required=True)
 
     args = parser.parse_args()
 
@@ -22,7 +22,10 @@ if __name__ == '__main__':
     periph_size = cluster_config['cluster_periph_size'] * 1024
     sa_base_address = cluster_base_addr + tcdm_size + periph_size
 
+    addr_width = cluster_config['addr_width']
+
     with open(hdr_path, '+w') as f:
         f.write(f'#define SA_BASE_ADDR {hex(sa_base_address)}\n')
         f.write(f'#define TCDM_BASE_ADDR {hex(cluster_base_addr)}\n')
+        f.write(f'#define CLUSTER_ADDR_WIDTH {hex(addr_width)}\n')
         f.close()
